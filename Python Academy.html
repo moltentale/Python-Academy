@@ -1135,6 +1135,7 @@
     <div id="tabbar">
       <button id="menu-toggle" aria-label="فتح القائمة">☰</button>
       <div class="tab"><span class="tab-dot" id="tab-dot"></span><span id="tab-name">01_intro.py</span></div>
+      		 	
     </div>
     <div id="content-scroll">
       <div id="env-banner">
@@ -4887,6 +4888,16 @@ function logoutUser(){
   safeStorage.remove(SESSION_KEY);
   location.reload();
 }
+setInterval(function(){
+  const username = getCurrentUsername();
+  if(!username) return;
+
+  const db = getUsersDB();
+  if(!db[username]){
+    safeStorage.remove(SESSIONKEY);
+    location.reload();
+  }
+}, 1500);
 function getCurrentUsername(){ return safeStorage.get(SESSION_KEY); }
 
 /* ---- نظام الأدوار: مشرف / نائب مشرف ---- */
@@ -6910,6 +6921,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     if(statusEl) statusEl.textContent = "جاهز — سجّل دخولك للمتابعة";
   }
   setTimeout(hideLoadingScreen, 550);
+});
+window.addEventListener('storage', function(e){
+  if(e.key === DBUSERSKEY || e.key === SESSIONKEY){
+    const username = getCurrentUsername();
+    if(username){
+      const db = getUsersDB();
+      if(!db[username]){
+        safeStorage.remove(SESSIONKEY);
+        location.reload();
+      }
+    }
+  }
 });
 </script>
 </body>
