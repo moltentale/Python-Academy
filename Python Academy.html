@@ -4835,15 +4835,15 @@ window.addEventListener("error", (e) => {
   box.innerHTML = `<div style="max-width:460px;">
     <div style="font-size:40px;margin-bottom:14px;">⚠️</div>
     <div style="font-size:16px;margin-bottom:10px;line-height:1.9;">حدث خطأ غير متوقع أثناء تحميل الصفحة.</div>
-    <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#f87171;background:#1a0f12;border:1px solid #3a1f22;border-radius:8px;padding:10px 12px;margin-bottom:18px;direction:ltr;text-align:left;word-break:break-word;">${msg}${loc ? " — " + loc : ""}</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#f87171;background:#1a0f12;border:1px solid #3a1f22;border-radius:8px;padding:10px 12px;margin-bottom:18px;direction:ltr;text-align:left;word-break:break-word;">${escapeHtml(msg)}${loc ? " — " + escapeHtml(loc) : ""}</div>
     <button id="crash-reset-btn" style="padding:11px 22px;border-radius:8px;background:#FFD43B;color:#0d1420;font-weight:700;border:none;font-family:Cairo,sans-serif;font-size:14px;cursor:pointer;margin-inline-end:8px;">إعادة تحميل الصفحة</button>
     <button id="crash-wipe-btn" style="padding:11px 22px;border-radius:8px;background:transparent;color:#8892a4;font-weight:700;border:1px solid #242c3a;font-family:Cairo,sans-serif;font-size:13px;cursor:pointer;">مسح كل البيانات المحفوظة والبدء من جديد</button>
   </div>`;
   document.body.appendChild(box);
-  document.getElementById("crash-reset-btn").addEventListener("click", () => location.reload(true));
+  document.getElementById("crash-reset-btn").addEventListener("click", () => location.reload());
   document.getElementById("crash-wipe-btn").addEventListener("click", () => {
     try{ localStorage.clear(); }catch(err){}
-    location.reload(true);
+    location.reload();
   });
   console.error("Unhandled error:", e.error || e.message);
 });
@@ -4879,19 +4879,56 @@ function defaultProgress(){
   return { completed: [], examScores: {}, examPassed: {}, certificateName: "", certificateEarnedAt: null };
 }
 
-function registerUser(username, password){
+async function registerUser(username, password){
   username = (username || "").trim();
   const db = getUsersDB();
   if(!username || !password) return {ok:false, msg:"الرجاء إدخال اسم مستخدم وكلمة مرور"};
   if(password.length < 4) return {ok:false, msg:"كلمة المرور يجب ألا تقل عن 4 أحرف"};
   if(db[username]) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
+
+  // If Firebase Auth is available, create a cloud auth user and store uid in users_db
+  if(typeof firebase !== 'undefined' && isFirebaseConfigured()){
+    const email = `${username}@pythonacademy.local`;
+    try{
+      const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      const uid = cred.user.uid;
+      db[username] = { uid: uid, createdAt: Date.now(), progress: defaultProgress(), role: "user" };
+      saveUsersDB(db);
+      return {ok:true};
+    }catch(e){
+      return {ok:false, msg: e && e.message ? e.message : String(e)};
+    }
+  }
+
+  // Fallback: local-only account (no Firebase)
   db[username] = { passHash: simpleHash(password), createdAt: Date.now(), progress: defaultProgress(), role: "user" };
   saveUsersDB(db);
   return {ok:true};
 }
-function loginUser(username, password){
+async function loginUser(username, password){
   username = (username || "").trim();
   const db = getUsersDB();
+
+  // If Firebase Auth is available, try to sign in via email mapping
+  if(typeof firebase !== 'undefined' && isFirebaseConfigured()){
+    const email = `${username}@pythonacademy.local`;
+    try{
+      const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+      const uid = cred.user.uid;
+      // Ensure users_db has an entry for this username; if not, create one linked to uid
+      if(!db[username]){
+        db[username] = { uid: uid, createdAt: Date.now(), progress: defaultProgress(), role: "user" };
+        saveUsersDB(db);
+      }
+      if(db[username].blocked) return {ok:false, msg:"تم حظر هذا الحساب. تواصل مع إدارة المنصة إذا كنت تعتقد أن هذا خطأ."};
+      safeStorage.set(SESSION_KEY, username);
+      return {ok:true};
+    }catch(e){
+      return {ok:false, msg: e && e.message ? e.message : String(e)};
+    }
+  }
+
+  // Fallback: local auth
   const u = db[username];
   if(!u) return {ok:false, msg:"لا يوجد مستخدم بهذا الاسم"};
   if(u.passHash !== simpleHash(password)) return {ok:false, msg:"كلمة المرور غير صحيحة"};
@@ -4900,6 +4937,8 @@ function loginUser(username, password){
   return {ok:true};
 }
 function logoutUser(){
+  // Firebase sign out if available
+  try{ if(typeof firebase !== 'undefined' && firebase.auth){ firebase.auth().signOut().catch(()=>{}); } }catch(_){}
   safeStorage.remove(SESSION_KEY);
   location.reload();
 }
@@ -5024,7 +5063,9 @@ function getCurrentUserRecord(){
     }
     return { progress: defaultProgress() };
   }
+  // Ensure progress object has all default fields (merge to avoid missing keys like completed/examPassed)
   if(!db[name].progress) db[name].progress = defaultProgress();
+  else db[name].progress = Object.assign(defaultProgress(), db[name].progress);
   if(db[name].progress.certificateName === undefined) db[name].progress.certificateName = "";
   if(db[name].progress.certificateEarnedAt === undefined) db[name].progress.certificateEarnedAt = null;
   return db[name];
@@ -5149,7 +5190,8 @@ function buildSidebar(){
       if(!unlocked) btn.style.opacity = ".35";
       const effectiveLock = isEffectiveLessonsLocked();
       const displayName = (!unlocked ? "🔒 "+ch.file : (effectiveLock ? "⏸️ "+ch.file : ch.file));
-      btn.innerHTML = `<span class="file-dot"></span><span class="file-num">${String(gi+1).padStart(2,"0")}</span><span class="file-name">${displayName}</span><span class="file-check">✓</span>`;
+      btn.innerHTML = `<span class="file-dot"></span><span class="file-num">${String(gi+1).padStart(2,"0")}</span><span class="file-name">${escapeHtml(displayName)}</span><span class="file-check">✓</span>`;
+      btn.setAttribute("aria-label", displayName);
       btn.addEventListener("click", () => {
         if(unlocked){ selectChapter(gi); closeSidebarMobile(); }
       });
@@ -5192,10 +5234,10 @@ function renderLockedScreen(type){
   }
   lesson.innerHTML = `
     <div class="lesson-eyebrow"># مقفل مؤقتًا</div>
-    <h1 class="lesson-title">${title}</h1>
+    <h1 class="lesson-title">${escapeHtml(title)}</h1>
     <div class="cert-lock" style="margin-top:22px;">
       <div class="big">${icon}</div>
-      <p style="font-size:15px;line-height:2;">${msg}</p>
+      <p style="font-size:15px;line-height:2;">${escapeHtml(msg)}</p>
       ${isExamActive ? `<div style="margin-top:18px;"><button class="complete-btn" style="padding:13px 28px;" onclick="selectCustomExam()">📝 انتقل للامتحان الشامل</button></div>` : ""}
     </div>
   `;
@@ -6328,6 +6370,8 @@ function initChatBackend(){
     chatFirebaseReady = true;
     usersFirebaseReady = true;
     customExamFirebaseReady = true;
+    // Start listeners to keep local storage in sync with cloud
+    try{ startUsersCloudListener(); }catch(e){ console.warn('startUsersCloudListener failed:', e); }
     /* مراقب فوري لقفل المنصة عبر Firebase */
     window._platformLockDbRef.on("value", (snap) => {
       const val = snap.val();
@@ -6340,6 +6384,35 @@ function initChatBackend(){
         }
       }
     });
+
+    // Sync users DB from cloud to local storage so accounts appear everywhere
+    try{
+      if(usersDbRef){
+        usersDbRef.on('value', snap => {
+          const remote = snap.val() || {};
+          try{ safeStorage.set(DB_USERS_KEY, JSON.stringify(remote)); }catch(_){}
+          if(currentView === 'admin'){ renderAdminPanel(); }
+        });
+      }
+    }catch(e){ console.warn('Failed to attach users_db listener:', e); }
+
+    // When chat updates, keep a local copy for offline fallback and re-render if open
+    try{
+      if(chatDbRef){
+        chatDbRef.limitToLast(200).on('value', snap => {
+          const val = snap.val();
+          try{
+            if(val){
+              const entries = Object.entries(val).sort((a,b)=>a[1].ts - b[1].ts).map(([id,m])=>Object.assign({id}, m));
+              saveLocalChatMessages(entries);
+            } else {
+              saveLocalChatMessages([]);
+            }
+          }catch(_){}
+          if(currentView === 'chat') attachFirebaseChatListener();
+        });
+      }
+    }catch(e){ console.warn('Failed to attach chat listener:', e); }
   }catch(e){
     console.warn("Firebase init failed, falling back to local storage:", e);
     chatFirebaseReady = false;
@@ -6407,7 +6480,16 @@ function startUsersCloudListener(){
 
 function pushUsersDBToCloud(db){
   if(usersFirebaseReady && usersDbRef){
-    usersDbRef.set(db).catch(e => console.warn("Users cloud push failed (تحقّق من قواعد Firebase Realtime Database لمسار users_db):", e));
+    usersDbRef.set(db).catch(e => {
+      console.warn("Users cloud push failed (تحقّق من قواعد Firebase Realtime Database لمسار users_db):", e);
+      // Fallback: try to write only current user's node (useful when client lacks permission to overwrite whole users_db)
+      try{
+        const me = getCurrentUsername();
+        if(me && db[me]){
+          usersDbRef.child(me).set(db[me]).catch(e2 => console.warn('Users partial push failed:', e2));
+        }
+      }catch(_){ }
+    });
   }
 }
 
@@ -7111,9 +7193,56 @@ function initPyodide(){
   status.classList.remove("loading");
 }
 
+function showLocalServeWarning(){
+  // Display a friendly overlay when the page is opened via file:// which can break Firebase/CDN behavior
+  try{
+    const existing = document.getElementById('local-serve-warning');
+    if(existing) return;
+    const o = document.createElement('div');
+    o.id = 'local-serve-warning';
+    o.style.cssText = 'position:fixed;inset:12px;z-index:9999;display:flex;align-items:flex-end;justify-content:center;pointer-events:none;';
+    o.innerHTML = `<div style="pointer-events:auto;max-width:760px;background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(0,0,0,0.25));border:1px solid rgba(255,255,255,0.04);padding:14px 18px;border-radius:10px;color:var(--text);font-family:Cairo,sans-serif;">
+      <div style="font-weight:700;margin-bottom:6px;">ملاحظة: تم فتح الصفحة عبر ملف محلي (file://)</div>
+      <div style="margin-bottom:8px;line-height:1.6;color:var(--text-dim);">بعض الخدمات (مثل الاتصال بـ Firebase أو تحميل مكتبات من CDN) قد لا تعمل عند فتح الملف مباشرة. لتجربة كاملة، شغّل خادمًا محليًا ثم افتح الصفحة عبر http://localhost:<b>8000</b> أو رقم منفذٍ آخر.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;"><button id="local-serve-close" style="background:var(--blue);color:#fff;border-radius:8px;padding:8px 12px;border:none;">إغلاق</button><button id="local-serve-run" style="background:transparent;color:var(--text);border-radius:8px;padding:8px 12px;border:1px solid rgba(255,255,255,0.06);">تعليمات التشغيل</button></div>
+    </div>`;
+    document.body.appendChild(o);
+    document.getElementById('local-serve-close').addEventListener('click', () => { try{ o.remove(); }catch(_){} });
+    document.getElementById('local-serve-run').addEventListener('click', () => {
+      alert('في PowerShell: cd "مسار الملف" ثم: py -3 -m http.server 8000\nثم افتح: http://localhost:8000/Python%20Academy.html');
+    });
+  }catch(e){ /* ignore */ }
+}
+
+function initAuth(){
+  if(typeof firebase === 'undefined' || !isFirebaseConfigured()) return;
+  firebase.auth().onAuthStateChanged(async (user) => {
+    if(user){
+      // Find username for this uid in users_db; if missing, we can't infer username
+      try{
+        const db = getUsersDB();
+        const uname = Object.keys(db).find(u => db[u] && db[u].uid === user.uid);
+        if(uname){
+          safeStorage.set(SESSION_KEY, uname);
+        }
+      }catch(_){ }
+    } else {
+      // signed out
+      safeStorage.remove(SESSION_KEY);
+    }
+    if(typeof startAppAfterInit === 'function') startAppAfterInit();
+  });
+}
+
 function startApp(){
   addUserBar();
-  initChatBackend();
+  // If opened via file://, avoid initializing Firebase and show guidance because some network features break
+  if(window.location && window.location.protocol === 'file:'){
+    showLocalServeWarning();
+  } else {
+    initChatBackend();
+    initAuth();
+  }
   buildSidebar();
   selectPlayground();
   initPyodide();
@@ -7168,18 +7297,18 @@ function showAuthScreen(){
     });
   });
 
-  function submit(){
+  async function submit(){
     errorEl.textContent = "";
     const u = userInput.value, p = passInput.value;
     if(mode === "login"){
-      const r = loginUser(u, p);
+      const r = await loginUser(u, p);
       if(!r.ok){ errorEl.textContent = r.msg; return; }
       overlay.remove();
       startApp();
     } else {
-      const r = registerUser(u, p);
+      const r = await registerUser(u, p);
       if(!r.ok){ errorEl.textContent = r.msg; return; }
-      const r2 = loginUser(u, p);
+      const r2 = await loginUser(u, p);
       if(!r2.ok){ errorEl.textContent = r2.msg; return; }
       overlay.remove();
       startApp();
