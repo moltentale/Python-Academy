@@ -484,6 +484,21 @@
   #certificate.cert-special::after{background:radial-gradient(ellipse, rgba(185,104,255,.18) 0%, transparent 70%);}
   #certificate.cert-special .cert-brand{background:linear-gradient(90deg,#b968ff,#ffd43b);-webkit-background-clip:text;background-clip:text;color:transparent;}
   #certificate.cert-special .cert-name{background:linear-gradient(90deg,#b968ff,#ffd43b);-webkit-background-clip:text;background-clip:text;color:transparent;border-bottom-color:rgba(185,104,255,.35);}
+  /* شهادة متميزة — وضع فاتح */
+  #certificate.cert-special.cert-light{background:linear-gradient(160deg,#fdf8ff,#f3eeff);border-color:#9b59d0;}
+  #certificate.cert-special.cert-light::before{border-color:rgba(155,89,208,.3);}
+  #certificate.cert-special.cert-light .cert-brand{background:linear-gradient(90deg,#7e22ce,#d97706);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  #certificate.cert-special.cert-light .cert-heading{color:#6b7280;}
+  #certificate.cert-special.cert-light .cert-title{color:#16181d;}
+  #certificate.cert-special.cert-light .cert-line{color:#4b5563;}
+  #certificate.cert-special.cert-light .cert-name{background:linear-gradient(90deg,#7e22ce,#d97706);-webkit-background-clip:text;background-clip:text;color:transparent;border-bottom-color:#ddd6f3;}
+  #certificate.cert-special.cert-light .cert-desc{color:#374151;}
+  #certificate.cert-special.cert-light .cert-desc-sub{color:#6b7280;}
+  #certificate.cert-special.cert-light .cert-date{color:#6b7280;}
+  #certificate.cert-special.cert-light .cert-id{color:#6b7280;}
+  #certificate.cert-special.cert-light .cert-sig .signature{color:#16181d;}
+  #certificate.cert-special.cert-light .cert-sig .sig-line{border-top-color:#d1d5db;color:#4b5563;}
+  #certificate.cert-special.cert-light .cert-sig .sig-role{color:#6b7280;}
 
 
 
@@ -4858,19 +4873,8 @@ function simpleHash(str){
 function getUsersDB(){
   try{ return JSON.parse(safeStorage.get(DB_USERS_KEY)) || {}; }catch(e){ return {}; }
 }
-function saveUsersDB(db){
-  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
-  pushUsersDBToCloud(db);
-}
+function saveUsersDB(db){ safeStorage.set(DB_USERS_KEY, JSON.stringify(db)); pushUsersDBToCloud(db); }
 
-/* نسخة ذكية تكتب فقط سجل المستخدم الحالي للسحابة بدل كتابة كل القاعدة */
-function saveCurrentUserToDB(db, username){
-  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
-  if(usersFirebaseReady && usersDbRef && username && db[username]){
-    usersDbRef.child(username).set(db[username])
-      .catch(e => console.warn("User record cloud write failed:", e));
-  }
-}
 function defaultProgress(){
   return { completed: [], examScores: {}, examPassed: {}, certificateName: "", certificateEarnedAt: null };
 }
@@ -4882,7 +4886,7 @@ function registerUser(username, password){
   if(password.length < 4) return {ok:false, msg:"كلمة المرور يجب ألا تقل عن 4 أحرف"};
   if(db[username]) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
   db[username] = { passHash: simpleHash(password), createdAt: Date.now(), progress: defaultProgress(), role: "user" };
-  saveCurrentUserToDB(db, username);
+  saveUsersDB(db);
   return {ok:true};
 }
 function loginUser(username, password){
@@ -4922,26 +4926,20 @@ function fullAdminProgress(){
 
 function ensureMainAdminAccount(){
   const db = getUsersDB();
-  let changed = false;
-
   if(!db[MAIN_ADMIN_NAME]){
     db[MAIN_ADMIN_NAME] = { passHash: simpleHash(MAIN_ADMIN_PASS), createdAt: Date.now(), progress: fullAdminProgress(), role: "admin" };
-    changed = true;
+    saveUsersDB(db);
   } else {
+    let changed = false;
     if(db[MAIN_ADMIN_NAME].role !== "admin"){ db[MAIN_ADMIN_NAME].role = "admin"; changed = true; }
+    /* تأكد إن حساب المشرف الرئيسي دايمًا كامل الصلاحيات وكل الفصول والامتحانات مفتوحة له */
     const missingChapters = chapters.some(ch => !db[MAIN_ADMIN_NAME].progress.completed.includes(ch.file));
     const missingExams = categoryOrder.some(cat => !db[MAIN_ADMIN_NAME].progress.examPassed[cat]);
-    if(missingChapters || missingExams){ db[MAIN_ADMIN_NAME].progress = fullAdminProgress(); changed = true; }
-  }
-
-  if(changed){
-    /* احفظ محليًا واكتب للسحابة فقط الحساب الناقص بدل كتابة كل قاعدة البيانات
-       عشان مانمحيش حسابات باقي المستخدمين القادمة من أجهزة تانية */
-    safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
-    if(usersFirebaseReady && usersDbRef){
-      usersDbRef.child(MAIN_ADMIN_NAME).set(db[MAIN_ADMIN_NAME])
-        .catch(e => console.warn("Admin account cloud write failed:", e));
+    if(missingChapters || missingExams){
+      db[MAIN_ADMIN_NAME].progress = fullAdminProgress();
+      changed = true;
     }
+    if(changed) saveUsersDB(db);
   }
 }
 
@@ -4959,22 +4957,20 @@ function setUserRole(username, role){
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   if(username === MAIN_ADMIN_NAME) return {ok:false, msg:"لا يمكن تعديل رتبة المشرف الرئيسي"};
   db[username].role = role;
-  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
-  if(usersFirebaseReady && usersDbRef)
-    usersDbRef.child(username + "/role").set(role).catch(e => console.warn("role write failed:", e));
+  saveUsersDB(db);
   return {ok:true};
 }
 
 /* ---- صلاحيات الحظر وفك الحظر وحذف الحساب: للمشرف الرئيسي ونائب المشرف ---- */
 function canActorModerateTarget(actorUsername, targetUsername){
   if(!actorUsername || !targetUsername) return false;
-  if(targetUsername === MAIN_ADMIN_NAME) return false;
-  if(actorUsername === targetUsername) return false;
+  if(targetUsername === MAIN_ADMIN_NAME) return false;          // لا يمكن المساس بالمشرف الرئيسي أبدًا
+  if(actorUsername === targetUsername) return false;            // لا يمكنك حظر أو حذف نفسك
   const actorRole = getUserRole(actorUsername);
   if(actorRole !== "admin" && actorRole !== "deputy") return false;
-  if(actorRole === "admin") return true;
+  if(actorRole === "admin") return true;                        // المشرف الرئيسي يقدر يتصرف مع أي حساب آخر
   const targetRole = getUserRole(targetUsername);
-  return targetRole === "user";
+  return targetRole === "user";                                 // نائب المشرف يقدر يتصرف بس مع المستخدمين العاديين
 }
 
 function blockUser(username){
@@ -4983,9 +4979,7 @@ function blockUser(username){
   const db = getUsersDB();
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   db[username].blocked = true;
-  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
-  if(usersFirebaseReady && usersDbRef)
-    usersDbRef.child(username + "/blocked").set(true).catch(e => console.warn("block write failed:", e));
+  saveUsersDB(db);
   return {ok:true};
 }
 function unblockUser(username){
@@ -4994,9 +4988,7 @@ function unblockUser(username){
   const db = getUsersDB();
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   db[username].blocked = false;
-  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
-  if(usersFirebaseReady && usersDbRef)
-    usersDbRef.child(username + "/blocked").set(false).catch(e => console.warn("unblock write failed:", e));
+  saveUsersDB(db);
   return {ok:true};
 }
 function deleteUserAccount(username){
@@ -5005,9 +4997,7 @@ function deleteUserAccount(username){
   const db = getUsersDB();
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   delete db[username];
-  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
-  if(usersFirebaseReady && usersDbRef)
-    usersDbRef.child(username).remove().catch(e => console.warn("delete write failed:", e));
+  saveUsersDB(db);
   return {ok:true};
 }
 
@@ -5044,7 +5034,7 @@ function saveCurrentUserRecord(rec){
   const name = getCurrentUsername();
   if(!name) return;
   db[name] = rec;
-  saveCurrentUserToDB(db, name);
+  saveUsersDB(db);
 }
 function resetProgress(){
   const rec = getCurrentUserRecord();
@@ -5122,7 +5112,8 @@ function buildSidebar(){
 
   const chatBtn = document.createElement("button");
   chatBtn.className = "file-item" + (currentView === "chat" ? " active" : "");
-  chatBtn.innerHTML = `<span class="file-dot"></span><span class="file-num">💬</span><span class="file-name">community_chat.py</span><span class="file-check"></span>`;
+  const chatLockLabel = isEffectiveChatLocked() ? "🔒 الشات (مقفل)" : "community_chat.py";
+  chatBtn.innerHTML = `<span class="file-dot"></span><span class="file-num">💬</span><span class="file-name">${chatLockLabel}</span><span class="file-check"></span>`;
   chatBtn.addEventListener("click", () => { selectChat(); closeSidebarMobile(); });
   tree.appendChild(chatBtn);
 
@@ -5156,8 +5147,12 @@ function buildSidebar(){
         (currentView==="lesson" && gi===currentChapterIndex ? " active" : "");
       btn.disabled = !unlocked;
       if(!unlocked) btn.style.opacity = ".35";
-      btn.innerHTML = `<span class="file-dot"></span><span class="file-num">${String(gi+1).padStart(2,"0")}</span><span class="file-name">${unlocked ? ch.file : "🔒 "+ch.file}</span><span class="file-check">✓</span>`;
-      btn.addEventListener("click", () => { if(unlocked){ selectChapter(gi); closeSidebarMobile(); } });
+      const effectiveLock = isEffectiveLessonsLocked();
+      const displayName = (!unlocked ? "🔒 "+ch.file : (effectiveLock ? "⏸️ "+ch.file : ch.file));
+      btn.innerHTML = `<span class="file-dot"></span><span class="file-num">${String(gi+1).padStart(2,"0")}</span><span class="file-name">${displayName}</span><span class="file-check">✓</span>`;
+      btn.addEventListener("click", () => {
+        if(unlocked){ selectChapter(gi); closeSidebarMobile(); }
+      });
       tree.appendChild(btn);
     });
 
@@ -5183,6 +5178,30 @@ function updateProgressStats(){
   document.getElementById("top-progress-fill").style.width = pct + "%";
 }
 
+/* ============================= شاشة القفل ============================= */
+function renderLockedScreen(type){
+  const lesson = document.getElementById("lesson");
+  const isExamActive = !!(getCustomExam() && getCustomExam().active);
+  let icon = "🔒";
+  let title = "المنصة مقفلة مؤقتًا";
+  let msg = "قام المشرف بقفل هذا القسم من المنصة مؤقتًا. يرجى الانتظار حتى يُفتح مجددًا.";
+  if(isExamActive){
+    icon = "📝";
+    title = "الامتحان الشامل جارٍ الآن";
+    msg = "تم قفل الفصول والدروس والشات أثناء فترة الامتحان الشامل. ركّز في الامتحان! يُفتح كل شيء بعد إغلاق الامتحان.";
+  }
+  lesson.innerHTML = `
+    <div class="lesson-eyebrow"># مقفل مؤقتًا</div>
+    <h1 class="lesson-title">${title}</h1>
+    <div class="cert-lock" style="margin-top:22px;">
+      <div class="big">${icon}</div>
+      <p style="font-size:15px;line-height:2;">${msg}</p>
+      ${isExamActive ? `<div style="margin-top:18px;"><button class="complete-btn" style="padding:13px 28px;" onclick="selectCustomExam()">📝 انتقل للامتحان الشامل</button></div>` : ""}
+    </div>
+  `;
+  document.getElementById("content-scroll").scrollTop = 0;
+}
+
 /* ============================= LESSON RENDERING ============================= */
 function escapeHtml(s){
   return (s||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -5193,6 +5212,13 @@ let cellCounter = 0;
 function renderLesson(idx){
   currentView = "lesson";
   currentChapterIndex = idx;
+  /* تحقق من قفل المنصة */
+  if(isEffectiveLessonsLocked()){
+    document.getElementById("tab-name").textContent = "🔒 مقفل";
+    document.getElementById("chapter-pos").textContent = "المنصة مقفلة مؤقتًا";
+    renderLockedScreen("lesson");
+    return;
+  }
   const ch = chapters[idx];
   const rec = getCurrentUserRecord();
   document.getElementById("tab-name").textContent = ch.file;
@@ -5616,8 +5642,40 @@ function selectChapter(idx){ renderLesson(idx); buildSidebar(); }
 
 /* ============================= الامتحان الشامل (يصنعه المشرف/النائب) ============================= */
 const DB_CUSTOM_EXAM_KEY = "pa_custom_exam_v1";
+const DB_PLATFORM_LOCK_KEY = "pa_platform_lock_v1";
 let customExamPickerOpen = false;
 let customExamTimerInterval = null;
+
+/* ============================= نظام قفل المنصة ============================= */
+function getPlatformLock(){
+  try{ return JSON.parse(safeStorage.get(DB_PLATFORM_LOCK_KEY)) || { lessonsLocked:false, chatLocked:false, examLocked:false }; }catch(e){ return { lessonsLocked:false, chatLocked:false, examLocked:false }; }
+}
+function savePlatformLock(lock){
+  safeStorage.set(DB_PLATFORM_LOCK_KEY, JSON.stringify(lock));
+  /* مزامنة مع Firebase لو متصل */
+  if(customExamFirebaseReady && window._platformLockDbRef){
+    try{ window._platformLockDbRef.set(lock); }catch(e){}
+  }
+}
+function isPlatformLessonsLocked(){
+  /* المشرفون لا يتأثرون بالقفل */
+  if(isCurrentUserModerator()) return false;
+  const lock = getPlatformLock();
+  return !!lock.lessonsLocked;
+}
+function isPlatformChatLocked(){
+  if(isCurrentUserModerator()) return false;
+  const lock = getPlatformLock();
+  return !!lock.chatLocked;
+}
+/* يُقفل كل شيء تلقائيًا عند إنشاء امتحان شامل نشط */
+function isAutoLockedByExam(){
+  if(isCurrentUserModerator()) return false;
+  const ex = getCustomExam();
+  return !!(ex && ex.active);
+}
+function isEffectiveLessonsLocked(){ return isPlatformLessonsLocked() || isAutoLockedByExam(); }
+function isEffectiveChatLocked(){ return isPlatformChatLocked() || isAutoLockedByExam(); }
 
 function getCustomExam(){
   try{ return JSON.parse(safeStorage.get(DB_CUSTOM_EXAM_KEY)) || null; }catch(e){ return null; }
@@ -5638,6 +5696,20 @@ function shuffleArray(arr){
   }
   return a;
 }
+/* تتبع الأسئلة المستخدمة في امتحانات سابقة لتفادي التكرار */
+const DB_USED_QUESTIONS_KEY = "pa_used_questions_v1";
+function getUsedQuestions(){
+  try{ return JSON.parse(safeStorage.get(DB_USED_QUESTIONS_KEY)) || []; }catch(e){ return []; }
+}
+function saveUsedQuestions(arr){
+  safeStorage.set(DB_USED_QUESTIONS_KEY, JSON.stringify(arr));
+}
+
+function makeQuestionId(q){
+  /* معرف فريد للسؤال بناءً على نصه */
+  return (q.q||"").trim().substring(0,60);
+}
+
 function generateCustomExam(cats, actor){
   let mcqPool = [];
   let essayPool = [];
@@ -5649,15 +5721,41 @@ function generateCustomExam(cats, actor){
       if(q.type === "essay") essayPool.push(tagged); else mcqPool.push(tagged);
     });
   });
-  mcqPool = shuffleArray(mcqPool).slice(0, 16);
-  essayPool = shuffleArray(essayPool).slice(0, 4);
+
+  /* نحاول تجنب الأسئلة المستخدمة في الامتحانات السابقة */
+  let usedIds = getUsedQuestions();
+
+  function pickQuestions(pool, count){
+    /* أولًا الأسئلة غير المستخدمة */
+    const fresh = pool.filter(q => !usedIds.includes(makeQuestionId(q)));
+    const stale = pool.filter(q => usedIds.includes(makeQuestionId(q)));
+    const shuffledFresh = shuffleArray(fresh);
+    const shuffledStale = shuffleArray(stale);
+    const combined = shuffledFresh.concat(shuffledStale);
+    return combined.slice(0, count);
+  }
+
+  const selectedMCQ = pickQuestions(mcqPool, 16);
+  const selectedEssay = pickQuestions(essayPool, 4);
+
+  /* لو ما فيش كافي، نأخذ من المتاح بدون قيد التكرار */
+  const finalMCQ = selectedMCQ.length < 16 ? shuffleArray(mcqPool).slice(0, 16) : selectedMCQ;
+  const finalEssay = selectedEssay.length < 4 ? shuffleArray(essayPool).slice(0, 4) : selectedEssay;
+
+  /* سجّل الأسئلة المختارة كمستخدمة */
+  const newUsedIds = finalMCQ.concat(finalEssay).map(makeQuestionId);
+  const updatedUsed = Array.from(new Set(usedIds.concat(newUsedIds)));
+  /* لا نحتفظ بأكثر من 200 معرف — نحذف الأقدم لو تجاوزنا */
+  if(updatedUsed.length > 200) updatedUsed.splice(0, updatedUsed.length - 200);
+  saveUsedQuestions(updatedUsed);
+
   return {
     active: true,
     categories: cats,
     createdAt: Date.now(),
     createdBy: actor || "",
     durationMinutes: 60,
-    questions: mcqPool.concat(essayPool)
+    questions: finalMCQ.concat(finalEssay)  /* 16 اختياري + 4 مقالي = 20 سؤال */
   };
 }
 
@@ -5851,53 +5949,92 @@ function renderSpecialCertificate(){
   document.getElementById("chapter-pos").textContent = "الشهادة المتميزة";
   const lesson = document.getElementById("lesson");
   const rec = getCurrentUserRecord();
+
   if(!rec || !rec.progress.specialCertificateEarnedAt){
-    lesson.innerHTML = `<div class="lesson-eyebrow"># الشهادة المتميزة</div><h1 class="lesson-title">الشهادة المتميزة 🏅</h1><div class="cert-lock"><div class="big">🔒</div>احصل على 100% بالظبط في الامتحان الشامل لفتح هذه الشهادة الخاصة.</div>`;
+    lesson.innerHTML = `
+      <div class="lesson-eyebrow"># الشهادة المتميزة</div>
+      <h1 class="lesson-title">الشهادة المتميزة 🏅</h1>
+      <div class="cert-lock"><div class="big">🔒</div>احصل على 100% بالظبط في الامتحان الشامل لفتح هذه الشهادة الخاصة.</div>`;
     document.getElementById("content-scroll").scrollTop = 0;
     return;
   }
+
   if(!rec.progress.specialCertificateName){
     rec.progress.specialCertificateName = rec.progress.certificateName || getCurrentUsername() || "";
     saveCurrentUserRecord(rec);
   }
-  const dateStr = formatArabicDate(rec.progress.specialCertificateEarnedAt);
+
+  const t = SPECIAL_CERT_TEXT[specialCertLang];
+  const dateStr = specialCertLang === "ar"
+    ? formatArabicDate(rec.progress.specialCertificateEarnedAt)
+    : formatEnglishDate(rec.progress.specialCertificateEarnedAt);
   const certId = "PA-ELITE-" + simpleHash(getCurrentUsername() + rec.progress.specialCertificateEarnedAt).toUpperCase();
 
   lesson.innerHTML = `
     <div class="lesson-eyebrow"># الشهادة المتميزة</div>
-    <h1 class="lesson-title">شهادة التفوّق بامتياز 🏅</h1>
-    <div class="lesson-intro"><p>حصلت على 100% في الامتحان الشامل — إنجاز نادر يستحق شهادة خاصة به. عدّل الاسم أدناه ثم حمّلها.</p></div>
+    <h1 class="lesson-title">${t.lessonTitle}</h1>
+    <div class="lesson-intro"><p>${t.lessonIntro}</p></div>
 
-    <input id="special-cert-name-input" class="cert-name-input" type="text" value="${escapeHtml(rec.progress.specialCertificateName)}" placeholder="اكتب اسمك كما تريده على الشهادة">
+    <div class="cert-controls">
+      <div class="cert-toggle-group">
+        <button type="button" data-scert-lang="ar" class="${specialCertLang==='ar' ? 'active' : ''}">العربية</button>
+        <button type="button" data-scert-lang="en" class="${specialCertLang==='en' ? 'active' : ''}">English</button>
+      </div>
+      <div class="cert-toggle-group">
+        <button type="button" data-scert-theme="dark" class="${specialCertTheme==='dark' ? 'active' : ''}">🌑 داكن</button>
+        <button type="button" data-scert-theme="light" class="${specialCertTheme==='light' ? 'active' : ''}">☀️ فاتح</button>
+      </div>
+    </div>
 
-    <div id="certificate" class="cert-special" style="margin-top:22px;">
+    <input id="special-cert-name-input" class="cert-name-input" type="text"
+      value="${escapeHtml(rec.progress.specialCertificateName)}"
+      placeholder="${escapeHtml(t.namePlaceholder)}">
+
+    <div id="certificate" class="cert-special${specialCertTheme==='light' ? ' cert-light' : ''}"
+         dir="${t.dir}" style="margin-top:22px;">
       <div class="cert-logo">${LOGO_SVG}</div>
       <div class="cert-brand">PYTHON_ACADEMY</div>
-      <div class="cert-heading">CERTIFICATE OF EXCELLENCE</div>
-      <div class="cert-title">شهادة تفوّق بامتياز</div>
-      <div class="cert-line">نشهد بأن</div>
+      <div class="cert-heading">${t.heading}</div>
+      <div class="cert-title">${t.title}</div>
+      <div class="cert-line">${t.subtitle}</div>
       <div class="cert-name" id="special-cert-name-display">${escapeHtml(rec.progress.specialCertificateName)}</div>
-      <div class="cert-desc">قد اجتاز الامتحان الشامل لمنصة PYTHON_ACADEMY بنسبة نجاح كاملة 100%، مثبتًا إتقانًا استثنائيًا يفوق المتوسط في كل المسارات التي شملها الامتحان.</div>
-      <div class="cert-desc-sub">تقييم شامل بنسبة نجاح 100%</div>
-      <div class="cert-date">بتاريخ ${dateStr}</div>
+      <div class="cert-desc">${t.desc}</div>
+      <div class="cert-desc-sub">${t.descSub}</div>
+      <div class="cert-date">${t.dateLabel(dateStr)}</div>
       <div class="cert-footer">
-        <div class="cert-id">رقم الشهادة<br>${certId}</div>
+        <div class="cert-id">${t.idLabel}<br>${certId}</div>
         <div class="cert-sig">
           <div class="signature">Mohammed Abdelnaser</div>
           <div class="sig-line">Mohammed Abdelnaser</div>
-          <div class="sig-role">المدير التنفيذي — PYTHON_ACADEMY</div>
+          <div class="sig-role">${t.sigRole}</div>
         </div>
       </div>
     </div>
 
-    <button id="special-cert-download-btn" class="cert-download-btn">⬇ تحميل الشهادة PDF</button>
-    <div class="cert-hint" style="text-align:center;">سيفتح مربّع طباعة المتصفح — اختر "حفظ كـ PDF" كوجهة الطباعة.</div>
+    <button id="special-cert-download-btn" class="cert-download-btn">${t.downloadBtn}</button>
+    <div class="cert-hint" style="text-align:center;">${t.downloadHint}</div>
   `;
+
   document.getElementById("content-scroll").scrollTop = 0;
+
+  document.querySelectorAll("[data-scert-lang]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      specialCertLang = btn.getAttribute("data-scert-lang");
+      renderSpecialCertificate();
+    });
+  });
+  document.querySelectorAll("[data-scert-theme]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      specialCertTheme = btn.getAttribute("data-scert-theme");
+      renderSpecialCertificate();
+    });
+  });
 
   const nameInput = document.getElementById("special-cert-name-input");
   const nameDisplay = document.getElementById("special-cert-name-display");
-  nameInput.addEventListener("input", () => { nameDisplay.textContent = nameInput.value.trim() || "بدون اسم"; });
+  nameInput.addEventListener("input", () => {
+    nameDisplay.textContent = nameInput.value.trim() || t.noName;
+  });
   nameInput.addEventListener("change", () => {
     const rec2 = getCurrentUserRecord();
     rec2.progress.specialCertificateName = nameInput.value.trim();
@@ -5916,6 +6053,13 @@ function selectExam(cat){
   currentExamCat = cat;
   currentExamAnswers = {};
   currentEssayGrades = {};
+  if(isEffectiveLessonsLocked()){
+    document.getElementById("tab-name").textContent = "🔒 مقفل";
+    document.getElementById("chapter-pos").textContent = "المنصة مقفلة";
+    renderLockedScreen("exam");
+    buildSidebar();
+    return;
+  }
   renderExam(cat);
   buildSidebar();
 }
@@ -6161,6 +6305,7 @@ let chatFirebaseReady = false;
 let usersFirebaseReady = false;
 let customExamFirebaseReady = false;
 let chatLocalUnsub = null;
+window._platformLockDbRef = null;
 
 function isFirebaseConfigured(){
   return FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("ضع_") &&
@@ -6179,9 +6324,22 @@ function initChatBackend(){
     chatDbRef = firebase.database().ref("public_chat");
     usersDbRef = firebase.database().ref("users_db");
     customExamDbRef = firebase.database().ref("custom_exam");
+    window._platformLockDbRef = firebase.database().ref("platform_lock");
     chatFirebaseReady = true;
     usersFirebaseReady = true;
     customExamFirebaseReady = true;
+    /* مراقب فوري لقفل المنصة عبر Firebase */
+    window._platformLockDbRef.on("value", (snap) => {
+      const val = snap.val();
+      if(val && typeof val === "object"){
+        safeStorage.set(DB_PLATFORM_LOCK_KEY, JSON.stringify(val));
+        /* تحديث الواجهة لو المستخدم داخل فصل أو شات */
+        if(currentView === "lesson" || currentView === "exam" || currentView === "chat"){
+          if(isEffectiveLessonsLocked() && currentView === "lesson"){ renderLockedScreen(); }
+          if(isEffectiveChatLocked() && currentView === "chat"){ renderLockedScreen(); }
+        }
+      }
+    });
   }catch(e){
     console.warn("Firebase init failed, falling back to local storage:", e);
     chatFirebaseReady = false;
@@ -6217,20 +6375,17 @@ function syncUsersFromCloud(){
   });
 }
 
-/* ---- مراقب Firebase: يُطبّق أي تغيير فوريًا على كل الأجهزة ---- */
+/* ---- مراقب Firebase: يُطبّق الحذف والحظر فوريًا على كل الأجهزة ---- */
 function startUsersCloudListener(){
   if(!usersFirebaseReady || !usersDbRef) return;
   usersDbRef.on("value", (snapshot) => {
     const remote = snapshot.val();
     if(!remote || typeof remote !== "object") return;
-
     /* حدّث النسخة المحلية بالبيانات الجديدة من السحابة */
     safeStorage.set(DB_USERS_KEY, JSON.stringify(remote));
-
     const me = getCurrentUsername();
     if(!me) return;
-
-    /* 1. حسابي اتحذف ← سجّل خروج فوري */
+    /* 1. حسابي اتحذف من المشرف ← سجّل خروج فوري */
     if(!remote[me]){
       if(!window.__pa_session_reload_triggered){
         window.__pa_session_reload_triggered = true;
@@ -6239,7 +6394,6 @@ function startUsersCloudListener(){
       }
       return;
     }
-
     /* 2. حسابي اتحظر ← سجّل خروج فوري */
     if(remote[me].blocked){
       if(!window.__pa_session_reload_triggered){
@@ -6247,20 +6401,14 @@ function startUsersCloudListener(){
         safeStorage.remove(SESSION_KEY);
         location.reload();
       }
-      return;
     }
-
-    /* 3. أعِد رسم لوحة الإدارة لو مفتوحة (عشان تظهر المستخدمين الجدد فورًا) */
-    if(currentView === "admin") renderAdminPanel();
-
-    /* 4. أعِد رسم الشات (قائمة المستخدمين، الرتب، إلخ) */
-    if(currentView === "chat") renderChatMessagesLocal();
   });
 }
 
 function pushUsersDBToCloud(db){
-  /* لا نستخدم usersDbRef.set(db) لأنه بيمحي كل حسابات السحابة التي لا تتواجد محليًا.
-     كل كتابة فعلية للسحابة تمر عبر child(username).set() المحدّد أعلاه. */
+  if(usersFirebaseReady && usersDbRef){
+    usersDbRef.set(db).catch(e => console.warn("Users cloud push failed (تحقّق من قواعد Firebase Realtime Database لمسار users_db):", e));
+  }
 }
 
 /* ---- مزامنة الامتحان الشامل مع السحابة (نفس منطق مزامنة الحسابات) ---- */
@@ -6339,6 +6487,13 @@ function clearAllChat(){
 
 function selectChat(){
   currentView = "chat";
+  if(isEffectiveChatLocked()){
+    document.getElementById("tab-name").textContent = "🔒 الشات مقفل";
+    document.getElementById("chapter-pos").textContent = "الشات مقفل مؤقتًا";
+    renderLockedScreen("chat");
+    buildSidebar();
+    return;
+  }
   renderChat();
   buildSidebar();
 }
@@ -6536,11 +6691,45 @@ function renderAdminPanel(){
     examSectionHtml += `<button class="admin-action-btn" id="open-create-exam-btn" style="padding:10px 20px;">🎯 صنع امتحان</button>`;
   }
 
+  const lock = getPlatformLock();
+  const lockSectionHtml = `
+    <div class="admin-section-title">🔒 قفل المنصة</div>
+    <div class="admin-exam-card">
+      <p style="font-size:13.5px;color:var(--text-dim);line-height:1.9;margin:0 0 14px;">
+        يمكنك قفل أجزاء من المنصة لجميع الطلاب مؤقتًا. المشرفون ونواب المشرف غير متأثرين بالقفل.
+        <br>⚠️ <b>ملاحظة:</b> عند إنشاء امتحان شامل نشط، تُقفل الفصول والشات تلقائيًا حتى يُغلق الامتحان.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--border);">
+          <span style="font-size:13.5px;">📚 قفل الفصول والدروس والامتحانات</span>
+          <button class="admin-action-btn ${lock.lessonsLocked ? 'danger' : ''}" id="toggle-lessons-lock-btn">
+            ${lock.lessonsLocked ? '🔓 فتح الفصول' : '🔒 قفل الفصول'}
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--border);">
+          <span style="font-size:13.5px;">💬 قفل الشات العام</span>
+          <button class="admin-action-btn ${lock.chatLocked ? 'danger' : ''}" id="toggle-chat-lock-btn">
+            ${lock.chatLocked ? '🔓 فتح الشات' : '🔒 قفل الشات'}
+          </button>
+        </div>
+      </div>
+      ${(lock.lessonsLocked || lock.chatLocked) ? `<div style="margin-top:12px;"><button class="complete-btn" id="unlock-all-btn" style="padding:9px 22px;">🔓 فتح كل شيء دفعة واحدة</button></div>` : ""}
+      <div style="margin-top:12px;font-size:12px;color:var(--text-mute);">
+        الحالة الحالية: الفصول <b style="color:${lock.lessonsLocked ? 'var(--red)' : 'var(--green)'}">${lock.lessonsLocked ? '🔒 مقفلة' : '✅ مفتوحة'}</b> ·
+        الشات <b style="color:${lock.chatLocked ? 'var(--red)' : 'var(--green)'}">${lock.chatLocked ? '🔒 مقفل' : '✅ مفتوح'}</b>
+        ${isAutoLockedByExam() ? ' · <b style="color:var(--yellow)">⚠️ قفل تلقائي بسبب الامتحان الشامل النشط</b>' : ''}
+      </div>
+    </div>
+  `;
+
   lesson.innerHTML = `
     <div class="lesson-eyebrow"># لوحة الإدارة</div>
     <h1 class="lesson-title">لوحة الإدارة 🛡️</h1>
     <div class="lesson-intro"><p>${isMainAdmin ? "بصفتك المشرف الرئيسي، تقدر تعيّن أي مستخدم مسجّل كـ«نائب مشرف»، وتحظر/تفك حظر أو تحذف أي حساب آخر." : "بصفتك نائب مشرف، تقدر تحظر/تفك حظر أو تحذف حسابات المستخدمين العاديين، بجانب صلاحيات الإشراف على الشات العام."}</p></div>
 
+    ${lockSectionHtml}
+
+    <div class="admin-section-title" style="margin-top:22px;">👥 إدارة المستخدمين</div>
     <div class="admin-users-list">
       ${rows || `<div class="chat-empty">لا يوجد مستخدمون مسجّلون بعد.</div>`}
     </div>
@@ -6646,6 +6835,33 @@ function renderAdminPanel(){
       }
     });
   }
+
+  /* ---- أزرار قفل المنصة ---- */
+  const toggleLessonsLockBtn = document.getElementById("toggle-lessons-lock-btn");
+  if(toggleLessonsLockBtn){
+    toggleLessonsLockBtn.addEventListener("click", () => {
+      const lk = getPlatformLock();
+      lk.lessonsLocked = !lk.lessonsLocked;
+      savePlatformLock(lk);
+      renderAdminPanel();
+    });
+  }
+  const toggleChatLockBtn = document.getElementById("toggle-chat-lock-btn");
+  if(toggleChatLockBtn){
+    toggleChatLockBtn.addEventListener("click", () => {
+      const lk = getPlatformLock();
+      lk.chatLocked = !lk.chatLocked;
+      savePlatformLock(lk);
+      renderAdminPanel();
+    });
+  }
+  const unlockAllBtn = document.getElementById("unlock-all-btn");
+  if(unlockAllBtn){
+    unlockAllBtn.addEventListener("click", () => {
+      savePlatformLock({ lessonsLocked:false, chatLocked:false });
+      renderAdminPanel();
+    });
+  }
 }
 
 function formatArabicDate(ts){
@@ -6661,6 +6877,8 @@ function formatEnglishDate(ts){
 
 let certLang = "ar";
 let certTheme = "dark";
+let specialCertLang = "ar";
+let specialCertTheme = "dark";
 
 const CERT_TEXT = {
   ar: {
@@ -6691,6 +6909,43 @@ const CERT_TEXT = {
     subtitle: "This certifies that",
     desc: "has demonstrated mastery of Python fundamentals and core programming principles throughout this course, progressing through data structures, functions, and object-oriented programming, up to advanced topics such as file handling, cybersecurity basics, and professional coding practices. All assessments associated with these tracks were successfully passed, qualifying for building real-world software projects with Python.",
     descSub: (n,m) => `${n} training chapters · ${m} assessment tracks completed`,
+    dateLabel: (d) => `Issued on ${d}`,
+    idLabel: "Certificate ID",
+    sigRole: "Executive Director — PYTHON_ACADEMY",
+    downloadBtn: "⬇ Download Certificate PDF",
+    downloadHint: 'This opens your browser\'s print dialog — choose "Save as PDF" as the destination.',
+  },
+};
+
+const SPECIAL_CERT_TEXT = {
+  ar: {
+    dir: "rtl",
+    lessonTitle: "شهادة التفوّق بامتياز — 100% 🏅",
+    lessonIntro: "حصلت على 100% في الامتحان الشامل — إنجاز استثنائي نادر. عدّل الاسم واختر اللغة والثيم ثم حمّلها.",
+    namePlaceholder: "اكتب اسمك كما تريده على الشهادة",
+    noName: "بدون اسم",
+    heading: "CERTIFICATE OF EXCELLENCE",
+    title: "شهادة تفوّق بامتياز",
+    subtitle: "نشهد بأن",
+    desc: "قد اجتاز الامتحان الشامل لمنصة PYTHON_ACADEMY بنسبة نجاح كاملة 100%، مُثبتًا إتقانًا استثنائيًا يفوق المتوسط في جميع المسارات التي شملها الامتحان، وهو إنجاز يُحقّقه نسبة ضيّقة جدًا من المتعلمين.",
+    descSub: "تقييم شامل بنسبة نجاح 100%",
+    dateLabel: (d) => `بتاريخ ${d}`,
+    idLabel: "رقم الشهادة",
+    sigRole: "المدير التنفيذي — PYTHON_ACADEMY",
+    downloadBtn: "⬇ تحميل الشهادة PDF",
+    downloadHint: 'سيفتح مربّع طباعة المتصفح — اختر "حفظ كـ PDF" كوجهة الطباعة.',
+  },
+  en: {
+    dir: "ltr",
+    lessonTitle: "Certificate of Excellence — 100% 🏅",
+    lessonIntro: "You achieved 100% on the comprehensive exam — an exceptional, rare accomplishment. Edit the name, choose language and theme, then download.",
+    namePlaceholder: "Enter the name as it should appear on the certificate",
+    noName: "No name",
+    heading: "CERTIFICATE OF EXCELLENCE",
+    title: "Certificate of Excellence",
+    subtitle: "This certifies that",
+    desc: "has achieved a perfect score of 100% on the PYTHON_ACADEMY Comprehensive Exam, demonstrating exceptional mastery across all assessed tracks — an accomplishment attained by only a small fraction of learners.",
+    descSub: "Comprehensive assessment · 100% perfect score",
     dateLabel: (d) => `Issued on ${d}`,
     idLabel: "Certificate ID",
     sigRole: "Executive Director — PYTHON_ACADEMY",
