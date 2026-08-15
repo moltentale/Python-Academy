@@ -4884,42 +4884,10 @@ function loginUser(username, password){
   safeStorage.set(SESSION_KEY, username);
   return {ok:true};
 }
-function logoutUser(){safeStorage.remove(SESSIONKEY);location.reload()}
-
-// === مراقبة حذف الحساب ===
-setInterval(function(){
-  const username = getCurrentUsername();
-  if(!username) return;
-
-  const db = getUsersDB();
-  if(!db[username]){
-    safeStorage.remove(SESSIONKEY);
-    location.reload();
-  }
-}, 1500);
-
-window.addEventListener('storage', function(e){
-  if(e.key === DBUSERSKEY || e.key === SESSIONKEY){
-    const username = getCurrentUsername();
-    if(username){
-      const db = getUsersDB();
-      if(!db[username]){
-        safeStorage.remove(SESSIONKEY);
-        location.reload();
-      }
-    }
-  }
-});
-setInterval(function(){
-  const username = getCurrentUsername();
-  if(!username) return;
-
-  const db = getUsersDB();
-  if(!db[username]){
-    safeStorage.remove(SESSIONKEY);
-    location.reload();
-  }
-}, 1500);
+function logoutUser(){
+  safeStorage.remove(SESSION_KEY);
+  location.reload();
+}
 function getCurrentUsername(){ return safeStorage.get(SESSION_KEY); }
 
 /* ---- نظام الأدوار: مشرف / نائب مشرف ---- */
@@ -6209,10 +6177,9 @@ function syncUsersFromCloud(){
       .then(snapshot => {
         const remote = snapshot.val();
         if(remote && typeof remote === "object"){
-          const local = getUsersDB();
-          const merged = Object.assign({}, remote, local);
-          /* أحدث createdAt يفضل، لكن أهم حاجة إن أي حساب موجود في أي مكان يفضل موجود */
-          safeStorage.set(DB_USERS_KEY, JSON.stringify(merged));
+          /* نستخدم بيانات السحابة كمصدر الحقيقة — لا نعيد دمج المحلي عليها
+             عشان لو حُذف مستخدم من السحابة مايرجعش بسبب البيانات المحلية القديمة */
+          safeStorage.set(DB_USERS_KEY, JSON.stringify(remote));
         }
         usersCloudSyncStatus = true;
         resolve(true);
@@ -6222,6 +6189,36 @@ function syncUsersFromCloud(){
         usersCloudSyncStatus = false;
         resolve(false);
       });
+  });
+}
+
+/* ---- مراقب Firebase: يُطبّق الحذف والحظر فوريًا على كل الأجهزة ---- */
+function startUsersCloudListener(){
+  if(!usersFirebaseReady || !usersDbRef) return;
+  usersDbRef.on("value", (snapshot) => {
+    const remote = snapshot.val();
+    if(!remote || typeof remote !== "object") return;
+    /* حدّث النسخة المحلية بالبيانات الجديدة من السحابة */
+    safeStorage.set(DB_USERS_KEY, JSON.stringify(remote));
+    const me = getCurrentUsername();
+    if(!me) return;
+    /* 1. حسابي اتحذف من المشرف ← سجّل خروج فوري */
+    if(!remote[me]){
+      if(!window.__pa_session_reload_triggered){
+        window.__pa_session_reload_triggered = true;
+        safeStorage.remove(SESSION_KEY);
+        location.reload();
+      }
+      return;
+    }
+    /* 2. حسابي اتحظر ← سجّل خروج فوري */
+    if(remote[me].blocked){
+      if(!window.__pa_session_reload_triggered){
+        window.__pa_session_reload_triggered = true;
+        safeStorage.remove(SESSION_KEY);
+        location.reload();
+      }
+    }
   });
 }
 
@@ -6942,19 +6939,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     showAuthScreen();
     if(statusEl) statusEl.textContent = "جاهز — سجّل دخولك للمتابعة";
   }
+  /* ابدأ مراقبة السحابة فوريًا بعد التحميل الأول عشان أي حذف/حظر يُطبَّق على الجهاز ده على طول */
+  startUsersCloudListener();
   setTimeout(hideLoadingScreen, 550);
-});
-window.addEventListener('storage', function(e){
-  if(e.key === DBUSERSKEY || e.key === SESSIONKEY){
-    const username = getCurrentUsername();
-    if(username){
-      const db = getUsersDB();
-      if(!db[username]){
-        safeStorage.remove(SESSIONKEY);
-        location.reload();
-      }
-    }
-  }
 });
 </script>
 </body>
