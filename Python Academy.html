@@ -4858,8 +4858,19 @@ function simpleHash(str){
 function getUsersDB(){
   try{ return JSON.parse(safeStorage.get(DB_USERS_KEY)) || {}; }catch(e){ return {}; }
 }
-function saveUsersDB(db){ safeStorage.set(DB_USERS_KEY, JSON.stringify(db)); pushUsersDBToCloud(db); }
+function saveUsersDB(db){
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
+  pushUsersDBToCloud(db);
+}
 
+/* نسخة ذكية تكتب فقط سجل المستخدم الحالي للسحابة بدل كتابة كل القاعدة */
+function saveCurrentUserToDB(db, username){
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
+  if(usersFirebaseReady && usersDbRef && username && db[username]){
+    usersDbRef.child(username).set(db[username])
+      .catch(e => console.warn("User record cloud write failed:", e));
+  }
+}
 function defaultProgress(){
   return { completed: [], examScores: {}, examPassed: {}, certificateName: "", certificateEarnedAt: null };
 }
@@ -4871,7 +4882,7 @@ function registerUser(username, password){
   if(password.length < 4) return {ok:false, msg:"كلمة المرور يجب ألا تقل عن 4 أحرف"};
   if(db[username]) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
   db[username] = { passHash: simpleHash(password), createdAt: Date.now(), progress: defaultProgress(), role: "user" };
-  saveUsersDB(db);
+  saveCurrentUserToDB(db, username);
   return {ok:true};
 }
 function loginUser(username, password){
@@ -4911,20 +4922,26 @@ function fullAdminProgress(){
 
 function ensureMainAdminAccount(){
   const db = getUsersDB();
+  let changed = false;
+
   if(!db[MAIN_ADMIN_NAME]){
     db[MAIN_ADMIN_NAME] = { passHash: simpleHash(MAIN_ADMIN_PASS), createdAt: Date.now(), progress: fullAdminProgress(), role: "admin" };
-    saveUsersDB(db);
+    changed = true;
   } else {
-    let changed = false;
     if(db[MAIN_ADMIN_NAME].role !== "admin"){ db[MAIN_ADMIN_NAME].role = "admin"; changed = true; }
-    /* تأكد إن حساب المشرف الرئيسي دايمًا كامل الصلاحيات وكل الفصول والامتحانات مفتوحة له */
     const missingChapters = chapters.some(ch => !db[MAIN_ADMIN_NAME].progress.completed.includes(ch.file));
     const missingExams = categoryOrder.some(cat => !db[MAIN_ADMIN_NAME].progress.examPassed[cat]);
-    if(missingChapters || missingExams){
-      db[MAIN_ADMIN_NAME].progress = fullAdminProgress();
-      changed = true;
+    if(missingChapters || missingExams){ db[MAIN_ADMIN_NAME].progress = fullAdminProgress(); changed = true; }
+  }
+
+  if(changed){
+    /* احفظ محليًا واكتب للسحابة فقط الحساب الناقص بدل كتابة كل قاعدة البيانات
+       عشان مانمحيش حسابات باقي المستخدمين القادمة من أجهزة تانية */
+    safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
+    if(usersFirebaseReady && usersDbRef){
+      usersDbRef.child(MAIN_ADMIN_NAME).set(db[MAIN_ADMIN_NAME])
+        .catch(e => console.warn("Admin account cloud write failed:", e));
     }
-    if(changed) saveUsersDB(db);
   }
 }
 
@@ -4942,20 +4959,22 @@ function setUserRole(username, role){
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   if(username === MAIN_ADMIN_NAME) return {ok:false, msg:"لا يمكن تعديل رتبة المشرف الرئيسي"};
   db[username].role = role;
-  saveUsersDB(db);
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
+  if(usersFirebaseReady && usersDbRef)
+    usersDbRef.child(username + "/role").set(role).catch(e => console.warn("role write failed:", e));
   return {ok:true};
 }
 
 /* ---- صلاحيات الحظر وفك الحظر وحذف الحساب: للمشرف الرئيسي ونائب المشرف ---- */
 function canActorModerateTarget(actorUsername, targetUsername){
   if(!actorUsername || !targetUsername) return false;
-  if(targetUsername === MAIN_ADMIN_NAME) return false;          // لا يمكن المساس بالمشرف الرئيسي أبدًا
-  if(actorUsername === targetUsername) return false;            // لا يمكنك حظر أو حذف نفسك
+  if(targetUsername === MAIN_ADMIN_NAME) return false;
+  if(actorUsername === targetUsername) return false;
   const actorRole = getUserRole(actorUsername);
   if(actorRole !== "admin" && actorRole !== "deputy") return false;
-  if(actorRole === "admin") return true;                        // المشرف الرئيسي يقدر يتصرف مع أي حساب آخر
+  if(actorRole === "admin") return true;
   const targetRole = getUserRole(targetUsername);
-  return targetRole === "user";                                 // نائب المشرف يقدر يتصرف بس مع المستخدمين العاديين
+  return targetRole === "user";
 }
 
 function blockUser(username){
@@ -4964,7 +4983,9 @@ function blockUser(username){
   const db = getUsersDB();
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   db[username].blocked = true;
-  saveUsersDB(db);
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
+  if(usersFirebaseReady && usersDbRef)
+    usersDbRef.child(username + "/blocked").set(true).catch(e => console.warn("block write failed:", e));
   return {ok:true};
 }
 function unblockUser(username){
@@ -4973,7 +4994,9 @@ function unblockUser(username){
   const db = getUsersDB();
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   db[username].blocked = false;
-  saveUsersDB(db);
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
+  if(usersFirebaseReady && usersDbRef)
+    usersDbRef.child(username + "/blocked").set(false).catch(e => console.warn("unblock write failed:", e));
   return {ok:true};
 }
 function deleteUserAccount(username){
@@ -4982,7 +5005,9 @@ function deleteUserAccount(username){
   const db = getUsersDB();
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
   delete db[username];
-  saveUsersDB(db);
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(db));
+  if(usersFirebaseReady && usersDbRef)
+    usersDbRef.child(username).remove().catch(e => console.warn("delete write failed:", e));
   return {ok:true};
 }
 
@@ -5019,7 +5044,7 @@ function saveCurrentUserRecord(rec){
   const name = getCurrentUsername();
   if(!name) return;
   db[name] = rec;
-  saveUsersDB(db);
+  saveCurrentUserToDB(db, name);
 }
 function resetProgress(){
   const rec = getCurrentUserRecord();
@@ -6192,17 +6217,20 @@ function syncUsersFromCloud(){
   });
 }
 
-/* ---- مراقب Firebase: يُطبّق الحذف والحظر فوريًا على كل الأجهزة ---- */
+/* ---- مراقب Firebase: يُطبّق أي تغيير فوريًا على كل الأجهزة ---- */
 function startUsersCloudListener(){
   if(!usersFirebaseReady || !usersDbRef) return;
   usersDbRef.on("value", (snapshot) => {
     const remote = snapshot.val();
     if(!remote || typeof remote !== "object") return;
+
     /* حدّث النسخة المحلية بالبيانات الجديدة من السحابة */
     safeStorage.set(DB_USERS_KEY, JSON.stringify(remote));
+
     const me = getCurrentUsername();
     if(!me) return;
-    /* 1. حسابي اتحذف من المشرف ← سجّل خروج فوري */
+
+    /* 1. حسابي اتحذف ← سجّل خروج فوري */
     if(!remote[me]){
       if(!window.__pa_session_reload_triggered){
         window.__pa_session_reload_triggered = true;
@@ -6211,6 +6239,7 @@ function startUsersCloudListener(){
       }
       return;
     }
+
     /* 2. حسابي اتحظر ← سجّل خروج فوري */
     if(remote[me].blocked){
       if(!window.__pa_session_reload_triggered){
@@ -6218,14 +6247,20 @@ function startUsersCloudListener(){
         safeStorage.remove(SESSION_KEY);
         location.reload();
       }
+      return;
     }
+
+    /* 3. أعِد رسم لوحة الإدارة لو مفتوحة (عشان تظهر المستخدمين الجدد فورًا) */
+    if(currentView === "admin") renderAdminPanel();
+
+    /* 4. أعِد رسم الشات (قائمة المستخدمين، الرتب، إلخ) */
+    if(currentView === "chat") renderChatMessagesLocal();
   });
 }
 
 function pushUsersDBToCloud(db){
-  if(usersFirebaseReady && usersDbRef){
-    usersDbRef.set(db).catch(e => console.warn("Users cloud push failed (تحقّق من قواعد Firebase Realtime Database لمسار users_db):", e));
-  }
+  /* لا نستخدم usersDbRef.set(db) لأنه بيمحي كل حسابات السحابة التي لا تتواجد محليًا.
+     كل كتابة فعلية للسحابة تمر عبر child(username).set() المحدّد أعلاه. */
 }
 
 /* ---- مزامنة الامتحان الشامل مع السحابة (نفس منطق مزامنة الحسابات) ---- */
