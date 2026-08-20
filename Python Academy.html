@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 :root{
     --bg:#0a0c12;
@@ -4881,75 +4881,72 @@ function defaultProgress(){
 
 async function registerUser(username, password){
   username = (username || "").trim();
-  const db = getUsersDB();
+  const localDb = getUsersDB();
   if(!username || !password) return {ok:false, msg:"الرجاء إدخال اسم مستخدم وكلمة مرور"};
   if(password.length < 4) return {ok:false, msg:"كلمة المرور يجب ألا تقل عن 4 أحرف"};
-  if(db[username]) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
+  if(ADMIN_ACCOUNTS.some(a => a.name === username)) return {ok:false, msg:"اسم المستخدم محجوز"};
 
-  // If Firebase Auth is available, create a cloud auth user and store uid in users_db
-  if(typeof firebase !== 'undefined' && isFirebaseConfigured()){
-    const email = `${username}@pythonacademy.local`;
+  /* تحقق من السحابة أولاً لو متصل */
+  if(usersFirebaseReady && db){
     try{
-      const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-      const uid = cred.user.uid;
-      db[username] = { uid: uid, createdAt: Date.now(), progress: defaultProgress(), role: "user" };
-      saveUsersDB(db);
-      return {ok:true};
-    }catch(e){
-      return {ok:false, msg: e && e.message ? e.message : String(e)};
-    }
+      const snap = await db.collection("users_db").doc(username).get();
+      if(snap.exists) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
+    }catch(e){ /* fallback to local check */ }
   }
+  if(localDb[username]) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
 
-  // Fallback: local-only account (no Firebase)
-  db[username] = { passHash: simpleHash(password), createdAt: Date.now(), progress: defaultProgress(), role: "user" };
-  saveUsersDB(db);
+  const newUser = { passHash: simpleHash(password), createdAt: Date.now(), progress: defaultProgress(), role: "user" };
+  localDb[username] = newUser;
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
+
+  /* احفظ في Firestore مباشرة */
+  if(usersFirebaseReady && db){
+    db.collection("users_db").doc(username).set(newUser)
+      .catch(e => console.warn("Register cloud push failed:", e));
+  }
   return {ok:true};
 }
 async function loginUser(username, password){
   username = (username || "").trim();
-  const db = getUsersDB();
 
-  // If Firebase Auth is available, try to sign in via email mapping
-  if(typeof firebase !== 'undefined' && isFirebaseConfigured()){
-    const email = `${username}@pythonacademy.local`;
+  /* جلب بيانات المستخدم من Firestore أولاً لو متصل */
+  let userRecord = null;
+  if(usersFirebaseReady && db){
     try{
-      const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
-      const uid = cred.user.uid;
-      // Ensure users_db has an entry for this username; if not, create one linked to uid
-      if(!db[username]){
-        db[username] = { uid: uid, createdAt: Date.now(), progress: defaultProgress(), role: "user" };
-        saveUsersDB(db);
+      const snap = await db.collection("users_db").doc(username).get();
+      if(snap.exists){
+        userRecord = snap.data();
+        /* حدّث النسخة المحلية */
+        const localDb = getUsersDB();
+        localDb[username] = userRecord;
+        safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
       }
-      if(db[username].blocked) return {ok:false, msg:"تم حظر هذا الحساب. تواصل مع إدارة المنصة إذا كنت تعتقد أن هذا خطأ."};
-      safeStorage.set(SESSION_KEY, username);
-      return {ok:true};
-    }catch(e){
-      return {ok:false, msg: e && e.message ? e.message : String(e)};
-    }
+    }catch(e){ console.warn("Login cloud fetch failed, using local:", e); }
   }
 
-  // Fallback: local auth
-  const u = db[username];
-  if(!u) return {ok:false, msg:"لا يوجد مستخدم بهذا الاسم"};
-  if(u.passHash !== simpleHash(password)) return {ok:false, msg:"كلمة المرور غير صحيحة"};
-  if(u.blocked) return {ok:false, msg:"تم حظر هذا الحساب. تواصل مع إدارة المنصة إذا كنت تعتقد أن هذا خطأ."};
+  /* fallback: النسخة المحلية */
+  if(!userRecord){
+    const localDb = getUsersDB();
+    userRecord = localDb[username] || null;
+  }
+
+  if(!userRecord) return {ok:false, msg:"لا يوجد مستخدم بهذا الاسم"};
+  if(!userRecord.passHash) return {ok:false, msg:"بيانات الحساب تالفة، تواصل مع المشرف"};
+  if(userRecord.passHash !== simpleHash(password)) return {ok:false, msg:"كلمة المرور غير صحيحة"};
+  if(userRecord.blocked) return {ok:false, msg:"تم حظر هذا الحساب. تواصل مع إدارة المنصة إذا كنت تعتقد أن هذا خطأ."};
   safeStorage.set(SESSION_KEY, username);
   return {ok:true};
 }
 function logoutUser(){
-  // Firebase sign out if available
-  try{ if(typeof firebase !== 'undefined' && firebase.auth){ firebase.auth().signOut().catch(()=>{}); } }catch(_){}
   safeStorage.remove(SESSION_KEY);
   location.reload();
 }
 function getCurrentUsername(){ return safeStorage.get(SESSION_KEY); }
 
 /* ---- نظام الأدوار: مشرف / نائب مشرف ---- */
-const MAIN_ADMIN_NAME = "Mohammed Abdelnaser";
-const MAIN_ADMIN_PASS = "ma&ged123";
 const ROLE_LABELS = { admin: "مشرف", deputy: "نائب مشرف" };
 
-function fullAdminProgress(){
+function fullAdminProgress(name){
   const completed = chapters.map(ch => ch.file);
   const examPassed = {};
   const examScores = {};
@@ -4958,28 +4955,35 @@ function fullAdminProgress(){
     completed,
     examScores,
     examPassed,
-    certificateName: MAIN_ADMIN_NAME,
+    certificateName: name || MAIN_ADMIN_NAME,
     certificateEarnedAt: Date.now()
   };
 }
 
+/* ---- الحسابات الإدارية الثلاثة ---- */
+const ADMIN_ACCOUNTS = [
+  { name: "Mohammed Abdelnaser", pass: "ma&ged123" },
+  { name: "Abdelhadi Mahmoud",   pass: "ma&ged123" },
+  { name: "Mahmoud Nusr",        pass: "ma&ged123" },
+];
+const MAIN_ADMIN_NAME = ADMIN_ACCOUNTS[0].name;
+const MAIN_ADMIN_PASS = ADMIN_ACCOUNTS[0].pass;
+
 function ensureMainAdminAccount(){
-  const db = getUsersDB();
-  if(!db[MAIN_ADMIN_NAME]){
-    db[MAIN_ADMIN_NAME] = { passHash: simpleHash(MAIN_ADMIN_PASS), createdAt: Date.now(), progress: fullAdminProgress(), role: "admin" };
-    saveUsersDB(db);
-  } else {
-    let changed = false;
-    if(db[MAIN_ADMIN_NAME].role !== "admin"){ db[MAIN_ADMIN_NAME].role = "admin"; changed = true; }
-    /* تأكد إن حساب المشرف الرئيسي دايمًا كامل الصلاحيات وكل الفصول والامتحانات مفتوحة له */
-    const missingChapters = chapters.some(ch => !db[MAIN_ADMIN_NAME].progress.completed.includes(ch.file));
-    const missingExams = categoryOrder.some(cat => !db[MAIN_ADMIN_NAME].progress.examPassed[cat]);
-    if(missingChapters || missingExams){
-      db[MAIN_ADMIN_NAME].progress = fullAdminProgress();
+  const localDb = getUsersDB();
+  let changed = false;
+  ADMIN_ACCOUNTS.forEach(({ name, pass }) => {
+    if(!localDb[name]){
+      localDb[name] = { passHash: simpleHash(pass), createdAt: Date.now(), progress: fullAdminProgress(name), role: "admin" };
       changed = true;
+    } else {
+      if(localDb[name].role !== "admin"){ localDb[name].role = "admin"; changed = true; }
+      const missingChapters = chapters.some(ch => !localDb[name].progress.completed.includes(ch.file));
+      const missingExams = categoryOrder.some(cat => !localDb[name].progress.examPassed[cat]);
+      if(missingChapters || missingExams){ localDb[name].progress = fullAdminProgress(name); changed = true; }
     }
-    if(changed) saveUsersDB(db);
-  }
+  });
+  if(changed) saveUsersDB(localDb);
 }
 
 function getUserRole(username){
@@ -4989,12 +4993,12 @@ function getUserRole(username){
 }
 function getCurrentUserRole(){ return getUserRole(getCurrentUsername()); }
 function isCurrentUserModerator(){ const r = getCurrentUserRole(); return r === "admin" || r === "deputy"; }
-function isCurrentUserMainAdmin(){ return getCurrentUsername() === MAIN_ADMIN_NAME; }
+function isCurrentUserMainAdmin(){ return ADMIN_ACCOUNTS.some(a => a.name === getCurrentUsername()); }
 
 function setUserRole(username, role){
   const db = getUsersDB();
   if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
-  if(username === MAIN_ADMIN_NAME) return {ok:false, msg:"لا يمكن تعديل رتبة المشرف الرئيسي"};
+  if(ADMIN_ACCOUNTS.some(a => a.name === username)) return {ok:false, msg:"لا يمكن تعديل رتبة المشرفين الرئيسيين"};
   db[username].role = role;
   saveUsersDB(db);
   return {ok:true};
@@ -5003,7 +5007,7 @@ function setUserRole(username, role){
 /* ---- صلاحيات الحظر وفك الحظر وحذف الحساب: للمشرف الرئيسي ونائب المشرف ---- */
 function canActorModerateTarget(actorUsername, targetUsername){
   if(!actorUsername || !targetUsername) return false;
-  if(targetUsername === MAIN_ADMIN_NAME) return false;          // لا يمكن المساس بالمشرف الرئيسي أبدًا
+  if(ADMIN_ACCOUNTS.some(a => a.name === targetUsername)) return false;  // لا يمكن المساس بأي مشرف رئيسي
   if(actorUsername === targetUsername) return false;            // لا يمكنك حظر أو حذف نفسك
   const actorRole = getUserRole(actorUsername);
   if(actorRole !== "admin" && actorRole !== "deputy") return false;
@@ -5033,10 +5037,16 @@ function unblockUser(username){
 function deleteUserAccount(username){
   const actor = getCurrentUsername();
   if(!canActorModerateTarget(actor, username)) return {ok:false, msg:"ليس لديك صلاحية لهذا الإجراء"};
-  const db = getUsersDB();
-  if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
-  delete db[username];
-  saveUsersDB(db);
+  const localDb = getUsersDB();
+  if(!localDb[username]) return {ok:false, msg:"المستخدم غير موجود"};
+  delete localDb[username];
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
+  /* حذف من Firestore مباشرة بدون batch عشان saveUsersDB هتكتب الكل */
+  if(usersFirebaseReady && db){
+    db.collection("users_db").doc(username).delete()
+      .catch(e => console.warn("Firestore delete user failed:", e));
+  }
+  pushUsersDBToCloud(localDb);
   return {ok:true};
 }
 
@@ -5694,9 +5704,9 @@ function getPlatformLock(){
 }
 function savePlatformLock(lock){
   safeStorage.set(DB_PLATFORM_LOCK_KEY, JSON.stringify(lock));
-  /* مزامنة مع Firebase لو متصل */
-  if(customExamFirebaseReady && window._platformLockDbRef){
-    try{ window._platformLockDbRef.set(lock); }catch(e){}
+  /* مزامنة مع Firestore لو متصل */
+  if(customExamFirebaseReady && db){
+    try{ db.collection("platform").doc("lock").set(lock); }catch(e){}
   }
 }
 function isPlatformLessonsLocked(){
@@ -6334,24 +6344,27 @@ function renderSupport(){
 /* عشان الشات يشتغل بين مستخدمين على أجهزة مختلفة، لازم تحط بيانات مشروع Firebase بتاعك هنا.
    شوف تعليمات الإعداد في رسالة الشرح. لو الإعداد ناقص، الشات هيشتغل محليًا فقط كنسخة احتياطية. */
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyBnHAuSMX4ccShWE4UgLNoRYiasA5PdqFc",
-  authDomain: "python-academy-10f77.firebaseapp.com",
-  databaseURL: "https://python-academy-10f77-default-rtdb.firebaseio.com",
-  projectId: "python-academy-10f77",
+  apiKey: "AIzaSyCgJVS-cFPhflBew0YaYB8AvPvuiy5EAzg",
+  authDomain: "python-380cc.firebaseapp.com",
+  projectId: "python-380cc",
+  storageBucket: "python-380cc.firebasestorage.app",
+  messagingSenderId: "836095234850",
+  appId: "1:836095234850:web:f4dd7003a4e3e4d4e4cb7b",
+  measurementId: "G-MJMT2ZH5DW"
 };
 
-let chatDbRef = null;
-let usersDbRef = null;
-let customExamDbRef = null;
+let db = null; /* Firestore instance */
 let chatFirebaseReady = false;
 let usersFirebaseReady = false;
 let customExamFirebaseReady = false;
 let chatLocalUnsub = null;
-window._platformLockDbRef = null;
+let _chatFsUnsub = null;
+let _usersFsUnsub = null;
+let _platformLockFsUnsub = null;
 
 function isFirebaseConfigured(){
-  return FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("ضع_") &&
-         FIREBASE_CONFIG.databaseURL && !FIREBASE_CONFIG.databaseURL.startsWith("ضع_");
+  return !!(FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("ضع_") &&
+            FIREBASE_CONFIG.projectId && !FIREBASE_CONFIG.projectId.startsWith("ضع_"));
 }
 
 function initChatBackend(){
@@ -6363,56 +6376,39 @@ function initChatBackend(){
   }
   try{
     if(!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-    chatDbRef = firebase.database().ref("public_chat");
-    usersDbRef = firebase.database().ref("users_db");
-    customExamDbRef = firebase.database().ref("custom_exam");
-    window._platformLockDbRef = firebase.database().ref("platform_lock");
+    db = firebase.firestore();
     chatFirebaseReady = true;
     usersFirebaseReady = true;
     customExamFirebaseReady = true;
-    // Start listeners to keep local storage in sync with cloud
-    try{ startUsersCloudListener(); }catch(e){ console.warn('startUsersCloudListener failed:', e); }
-    /* مراقب فوري لقفل المنصة عبر Firebase */
-    window._platformLockDbRef.on("value", (snap) => {
-      const val = snap.val();
+
+    /* مراقب فوري لقفل المنصة عبر Firestore */
+    if(_platformLockFsUnsub) _platformLockFsUnsub();
+    _platformLockFsUnsub = db.collection("platform").doc("lock").onSnapshot(snap => {
+      const val = snap.data();
       if(val && typeof val === "object"){
         safeStorage.set(DB_PLATFORM_LOCK_KEY, JSON.stringify(val));
-        /* تحديث الواجهة لو المستخدم داخل فصل أو شات */
         if(currentView === "lesson" || currentView === "exam" || currentView === "chat"){
           if(isEffectiveLessonsLocked() && currentView === "lesson"){ renderLockedScreen(); }
           if(isEffectiveChatLocked() && currentView === "chat"){ renderLockedScreen(); }
         }
       }
-    });
+    }, e => console.warn('platform lock listener error:', e));
 
-    // Sync users DB from cloud to local storage so accounts appear everywhere
-    try{
-      if(usersDbRef){
-        usersDbRef.on('value', snap => {
-          const remote = snap.val() || {};
-          try{ safeStorage.set(DB_USERS_KEY, JSON.stringify(remote)); }catch(_){}
-          if(currentView === 'admin'){ renderAdminPanel(); }
-        });
-      }
-    }catch(e){ console.warn('Failed to attach users_db listener:', e); }
+    /* مراقب حسابات المستخدمين */
+    try{ startUsersCloudListener(); }catch(e){ console.warn('startUsersCloudListener failed:', e); }
 
-    // When chat updates, keep a local copy for offline fallback and re-render if open
+    /* مراقب شات لحفظ نسخة محلية */
     try{
-      if(chatDbRef){
-        chatDbRef.limitToLast(200).on('value', snap => {
-          const val = snap.val();
-          try{
-            if(val){
-              const entries = Object.entries(val).sort((a,b)=>a[1].ts - b[1].ts).map(([id,m])=>Object.assign({id}, m));
-              saveLocalChatMessages(entries);
-            } else {
-              saveLocalChatMessages([]);
-            }
-          }catch(_){}
-          if(currentView === 'chat') attachFirebaseChatListener();
-        });
-      }
+      if(_chatFsUnsub) _chatFsUnsub();
+      _chatFsUnsub = db.collection("public_chat").orderBy("ts","desc").limit(200).onSnapshot(snap => {
+        try{
+          const entries = snap.docs.map(d => Object.assign({id: d.id}, d.data())).reverse();
+          saveLocalChatMessages(entries);
+        }catch(_){}
+        if(currentView === 'chat') attachFirebaseChatListener();
+      }, e => console.warn('chat listener error:', e));
     }catch(e){ console.warn('Failed to attach chat listener:', e); }
+
   }catch(e){
     console.warn("Firebase init failed, falling back to local storage:", e);
     chatFirebaseReady = false;
@@ -6428,20 +6424,19 @@ let usersCloudSyncStatus = null; /* null = لسه محاولناش، true = نج
 
 function syncUsersFromCloud(){
   return new Promise((resolve) => {
-    if(!usersFirebaseReady || !usersDbRef){ resolve(false); return; }
-    usersDbRef.once("value")
+    if(!usersFirebaseReady || !db){ resolve(false); return; }
+    db.collection("users_db").get()
       .then(snapshot => {
-        const remote = snapshot.val();
-        if(remote && typeof remote === "object"){
-          /* نستخدم بيانات السحابة كمصدر الحقيقة — لا نعيد دمج المحلي عليها
-             عشان لو حُذف مستخدم من السحابة مايرجعش بسبب البيانات المحلية القديمة */
+        const remote = {};
+        snapshot.forEach(doc => { remote[doc.id] = doc.data(); });
+        if(Object.keys(remote).length > 0){
           safeStorage.set(DB_USERS_KEY, JSON.stringify(remote));
         }
         usersCloudSyncStatus = true;
         resolve(true);
       })
       .catch(e => {
-        console.warn("Users cloud sync failed (تحقّق من قواعد Firebase Realtime Database لمسار users_db):", e);
+        console.warn("Users cloud sync failed (تحقّق من قواعد Firestore لـ users_db):", e);
         usersCloudSyncStatus = false;
         resolve(false);
       });
@@ -6450,15 +6445,15 @@ function syncUsersFromCloud(){
 
 /* ---- مراقب Firebase: يُطبّق الحذف والحظر فوريًا على كل الأجهزة ---- */
 function startUsersCloudListener(){
-  if(!usersFirebaseReady || !usersDbRef) return;
-  usersDbRef.on("value", (snapshot) => {
-    const remote = snapshot.val();
-    if(!remote || typeof remote !== "object") return;
-    /* حدّث النسخة المحلية بالبيانات الجديدة من السحابة */
+  if(!usersFirebaseReady || !db) return;
+  if(_usersFsUnsub) _usersFsUnsub();
+  _usersFsUnsub = db.collection("users_db").onSnapshot(snapshot => {
+    const remote = {};
+    snapshot.forEach(doc => { remote[doc.id] = doc.data(); });
     safeStorage.set(DB_USERS_KEY, JSON.stringify(remote));
+    if(currentView === 'admin'){ renderAdminPanel(); }
     const me = getCurrentUsername();
     if(!me) return;
-    /* 1. حسابي اتحذف من المشرف ← سجّل خروج فوري */
     if(!remote[me]){
       if(!window.__pa_session_reload_triggered){
         window.__pa_session_reload_triggered = true;
@@ -6467,7 +6462,6 @@ function startUsersCloudListener(){
       }
       return;
     }
-    /* 2. حسابي اتحظر ← سجّل خروج فوري */
     if(remote[me].blocked){
       if(!window.__pa_session_reload_triggered){
         window.__pa_session_reload_triggered = true;
@@ -6475,31 +6469,37 @@ function startUsersCloudListener(){
         location.reload();
       }
     }
-  });
+  }, e => console.warn('users_db listener error:', e));
 }
 
-function pushUsersDBToCloud(db){
-  if(usersFirebaseReady && usersDbRef){
-    usersDbRef.set(db).catch(e => {
-      console.warn("Users cloud push failed (تحقّق من قواعد Firebase Realtime Database لمسار users_db):", e);
-      // Fallback: try to write only current user's node (useful when client lacks permission to overwrite whole users_db)
-      try{
-        const me = getCurrentUsername();
-        if(me && db[me]){
-          usersDbRef.child(me).set(db[me]).catch(e2 => console.warn('Users partial push failed:', e2));
-        }
-      }catch(_){ }
-    });
-  }
+function pushUsersDBToCloud(usersData){
+  if(!usersFirebaseReady || !db) return;
+  /* نكتب كل مستخدم كـ document منفصل في collection users_db */
+  const batch = db.batch();
+  Object.entries(usersData).forEach(([username, userData]) => {
+    const ref = db.collection("users_db").doc(username);
+    batch.set(ref, userData, {merge: true});
+  });
+  batch.commit().catch(e => {
+    console.warn("Users cloud push failed:", e);
+    /* Fallback: اكتب المستخدم الحالي فقط */
+    try{
+      const me = getCurrentUsername();
+      if(me && usersData[me]){
+        db.collection("users_db").doc(me).set(usersData[me], {merge:true})
+          .catch(e2 => console.warn('Users partial push failed:', e2));
+      }
+    }catch(_){}
+  });
 }
 
 /* ---- مزامنة الامتحان الشامل مع السحابة (نفس منطق مزامنة الحسابات) ---- */
 function syncCustomExamFromCloud(){
   return new Promise((resolve) => {
-    if(!customExamFirebaseReady || !customExamDbRef){ resolve(false); return; }
-    customExamDbRef.once("value")
-      .then(snapshot => {
-        const remote = snapshot.val();
+    if(!customExamFirebaseReady || !db){ resolve(false); return; }
+    db.collection("platform").doc("custom_exam").get()
+      .then(snap => {
+        const remote = snap.exists ? snap.data() : null;
         safeStorage.set(DB_CUSTOM_EXAM_KEY, JSON.stringify(remote || null));
         resolve(true);
       })
@@ -6507,9 +6507,9 @@ function syncCustomExamFromCloud(){
   });
 }
 function pushCustomExamToCloud(exam){
-  if(customExamFirebaseReady && customExamDbRef){
-    customExamDbRef.set(exam).catch(e => console.warn("Custom exam cloud push failed:", e));
-  }
+  if(!customExamFirebaseReady || !db) return;
+  db.collection("platform").doc("custom_exam").set(exam || {})
+    .catch(e => console.warn("Custom exam cloud push failed:", e));
 }
 
 /* ---- Fallback: تخزين محلي في حالة عدم إعداد Firebase ---- */
@@ -6523,8 +6523,9 @@ function postChatMessage(text){
   const clean = text.trim();
   if(!clean) return;
   const msg = { user: getCurrentUsername() || "زائر", text: clean, ts: Date.now() };
-  if(chatFirebaseReady && chatDbRef){
-    chatDbRef.push(msg);
+  if(chatFirebaseReady && db){
+    db.collection("public_chat").add(msg)
+      .catch(e => console.warn("postChatMessage failed:", e));
   } else {
     msg.id = "l" + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
     const msgs = getLocalChatMessages();
@@ -6535,8 +6536,9 @@ function postChatMessage(text){
 }
 
 function deleteChatMessage(id){
-  if(chatFirebaseReady && chatDbRef){
-    chatDbRef.child(id).remove();
+  if(chatFirebaseReady && db){
+    db.collection("public_chat").doc(id).delete()
+      .catch(e => console.warn("deleteChatMessage failed:", e));
   } else {
     const msgs = getLocalChatMessages().filter(m => m.id !== id);
     saveLocalChatMessages(msgs);
@@ -6547,8 +6549,10 @@ function deleteChatMessage(id){
 function editChatMessage(id, newText){
   const clean = (newText || "").trim();
   if(!clean) return;
-  if(chatFirebaseReady && chatDbRef){
-    chatDbRef.child(id).update({ text: clean, editedBy: getCurrentUsername() || "", editedAt: Date.now() });
+  if(chatFirebaseReady && db){
+    db.collection("public_chat").doc(id).update({
+      text: clean, editedBy: getCurrentUsername() || "", editedAt: Date.now()
+    }).catch(e => console.warn("editChatMessage failed:", e));
   } else {
     const msgs = getLocalChatMessages();
     const m = msgs.find(x => x.id === id);
@@ -6559,8 +6563,12 @@ function editChatMessage(id, newText){
 }
 
 function clearAllChat(){
-  if(chatFirebaseReady && chatDbRef){
-    chatDbRef.remove();
+  if(chatFirebaseReady && db){
+    db.collection("public_chat").get().then(snap => {
+      const batch = db.batch();
+      snap.forEach(doc => batch.delete(doc.ref));
+      return batch.commit();
+    }).catch(e => console.warn("clearAllChat failed:", e));
   } else {
     saveLocalChatMessages([]);
     renderChatMessagesLocal();
@@ -6642,16 +6650,18 @@ function renderChatMessagesLocal(){
 
 function attachFirebaseChatListener(){
   const box = document.getElementById("chat-messages");
-  if(!box || !chatDbRef) return;
+  if(!box || !db) return;
   box.innerHTML = `<div class="chat-empty">جارٍ تحميل الرسائل...</div>`;
-  chatDbRef.limitToLast(200).on("value", snapshot => {
+  if(_chatFsUnsub) _chatFsUnsub();
+  _chatFsUnsub = db.collection("public_chat").orderBy("ts","asc").limitToLast(200).onSnapshot(snapshot => {
     if(currentView !== "chat") return;
-    const val = snapshot.val();
-    const entries = val ? Object.entries(val).sort((a,b) => a[1].ts - b[1].ts) : [];
-    box.innerHTML = entries.length ? entries.map(([id, m]) => renderMsgHtml(m, id)).join("") : `<div class="chat-empty">لا توجد رسائل بعد — كن أول من يبدأ النقاش 👋</div>`;
+    const entries = snapshot.docs.map(d => Object.assign({id: d.id}, d.data()));
+    box.innerHTML = entries.length
+      ? entries.map(m => renderMsgHtml(m, m.id)).join("")
+      : `<div class="chat-empty">لا توجد رسائل بعد — كن أول من يبدأ النقاش 👋</div>`;
     box.scrollTop = box.scrollHeight;
     bindChatModActions();
-  });
+  }, e => console.warn("chat listener error:", e));
 }
 
 function renderChat(){
@@ -6712,7 +6722,7 @@ function renderAdminPanel(){
   const db = getUsersDB();
   const isMainAdmin = isCurrentUserMainAdmin();
   const actor = getCurrentUsername();
-  const usernames = Object.keys(db).filter(u => u !== MAIN_ADMIN_NAME).sort();
+  const usernames = Object.keys(db).filter(u => !ADMIN_ACCOUNTS.some(a => a.name === u)).sort();
 
   const rows = usernames.map(u => {
     const role = getUserRole(u);
@@ -7215,23 +7225,7 @@ function showLocalServeWarning(){
 }
 
 function initAuth(){
-  if(typeof firebase === 'undefined' || !isFirebaseConfigured()) return;
-  firebase.auth().onAuthStateChanged(async (user) => {
-    if(user){
-      // Find username for this uid in users_db; if missing, we can't infer username
-      try{
-        const db = getUsersDB();
-        const uname = Object.keys(db).find(u => db[u] && db[u].uid === user.uid);
-        if(uname){
-          safeStorage.set(SESSION_KEY, uname);
-        }
-      }catch(_){ }
-    } else {
-      // signed out
-      safeStorage.remove(SESSION_KEY);
-    }
-    if(typeof startAppAfterInit === 'function') startAppAfterInit();
-  });
+  /* Firebase Auth مش مستخدم — الأوثنتيكيشن بيتم عبر passHash + Firestore فقط */
 }
 
 function startApp(){
