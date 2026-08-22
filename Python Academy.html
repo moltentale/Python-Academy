@@ -4861,6 +4861,35 @@ const safeStorage = {
   }
 };
 
+/* ============================= Firestore Primary Storage Helpers ============================= */
+/* كل البيانات الدائمة بتتحفظ على Firestore أولاً، والـ localStorage بيُستخدم كـ cache محلي فقط */
+
+/* حفظ مستخدم واحد على Firestore */
+function fsSetUser(username, userData){
+  if(!usersFirebaseReady || !db) return Promise.resolve();
+  return db.collection("users_db").doc(username).set(userData, {merge:true})
+    .catch(e => console.warn("fsSetUser failed:", e));
+}
+
+/* حفظ progress المستخدم الحالي على Firestore مباشرة */
+function fsSaveProgress(username, rec){
+  if(!usersFirebaseReady || !db) return Promise.resolve();
+  return db.collection("users_db").doc(username).set(rec, {merge:true})
+    .catch(e => console.warn("fsSaveProgress failed:", e));
+}
+
+/* حفظ حقل واحد في document المستخدم على Firestore */
+function fsUpdateUserField(username, fieldObj){
+  if(!usersFirebaseReady || !db) return Promise.resolve();
+  return db.collection("users_db").doc(username).update(fieldObj)
+    .catch(e => {
+      /* لو الـ doc مش موجود، نعمل set */
+      if(usersFirebaseReady && db)
+        db.collection("users_db").doc(username).set(fieldObj, {merge:true})
+          .catch(e2 => console.warn("fsUpdateUserField set fallback failed:", e2));
+    });
+}
+
 /* ============================= الحسابات وتسجيل الدخول ============================= */
 const DB_USERS_KEY = "pa_users_db_v3";
 const SESSION_KEY = "pa_session_user_v3";
@@ -4873,7 +4902,28 @@ function simpleHash(str){
 function getUsersDB(){
   try{ return JSON.parse(safeStorage.get(DB_USERS_KEY)) || {}; }catch(e){ return {}; }
 }
-function saveUsersDB(db){ safeStorage.set(DB_USERS_KEY, JSON.stringify(db)); pushUsersDBToCloud(db); }
+function saveUsersDB(usersData){
+  /* الـ localStorage كـ cache فقط */
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(usersData));
+  /* Firestore هو المصدر الرئيسي — نكتب كل مستخدم كـ document */
+  if(usersFirebaseReady && db){
+    const batch = db.batch();
+    Object.entries(usersData).forEach(([username, userData]) => {
+      const ref = db.collection("users_db").doc(username);
+      batch.set(ref, userData, {merge: true});
+    });
+    batch.commit().catch(e => {
+      console.warn("saveUsersDB batch failed, retrying single user:", e);
+      try{
+        const me = getCurrentUsername();
+        if(me && usersData[me]){
+          db.collection("users_db").doc(me).set(usersData[me], {merge:true})
+            .catch(e2 => console.warn("saveUsersDB single user failed:", e2));
+        }
+      }catch(_){}
+    });
+  }
+}
 
 function defaultProgress(){
   return { completed: [], examScores: {}, examPassed: {}, certificateName: "", certificateEarnedAt: null };
@@ -4896,14 +4946,18 @@ async function registerUser(username, password){
   if(localDb[username]) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
 
   const newUser = { passHash: simpleHash(password), createdAt: Date.now(), progress: defaultProgress(), role: "user" };
+
+  /* احفظ في Firestore أولاً كـ primary */
+  if(usersFirebaseReady && db){
+    try{
+      await db.collection("users_db").doc(username).set(newUser);
+    }catch(e){
+      console.warn("Register Firestore write failed, saving locally:", e);
+    }
+  }
+  /* حدّث الـ cache المحلي */
   localDb[username] = newUser;
   safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
-
-  /* احفظ في Firestore مباشرة */
-  if(usersFirebaseReady && db){
-    db.collection("users_db").doc(username).set(newUser)
-      .catch(e => console.warn("Register cloud push failed:", e));
-  }
   return {ok:true};
 }
 async function loginUser(username, password){
@@ -4988,19 +5042,24 @@ function ensureMainAdminAccount(){
 
 function getUserRole(username){
   if(!username) return "user";
-  const db = getUsersDB();
-  return (db[username] && db[username].role) || "user";
+  const usersDb = getUsersDB();
+  return (usersDb[username] && usersDb[username].role) || "user";
 }
 function getCurrentUserRole(){ return getUserRole(getCurrentUsername()); }
 function isCurrentUserModerator(){ const r = getCurrentUserRole(); return r === "admin" || r === "deputy"; }
 function isCurrentUserMainAdmin(){ return ADMIN_ACCOUNTS.some(a => a.name === getCurrentUsername()); }
 
 function setUserRole(username, role){
-  const db = getUsersDB();
-  if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
+  const localDb = getUsersDB();
+  if(!localDb[username]) return {ok:false, msg:"المستخدم غير موجود"};
   if(ADMIN_ACCOUNTS.some(a => a.name === username)) return {ok:false, msg:"لا يمكن تعديل رتبة المشرفين الرئيسيين"};
-  db[username].role = role;
-  saveUsersDB(db);
+  localDb[username].role = role;
+  /* Firestore أولاً */
+  if(usersFirebaseReady && db){
+    db.collection("users_db").doc(username).update({role: role})
+      .catch(e => console.warn("setUserRole Firestore failed:", e));
+  }
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
   return {ok:true};
 }
 
@@ -5019,19 +5078,29 @@ function canActorModerateTarget(actorUsername, targetUsername){
 function blockUser(username){
   const actor = getCurrentUsername();
   if(!canActorModerateTarget(actor, username)) return {ok:false, msg:"ليس لديك صلاحية لهذا الإجراء"};
-  const db = getUsersDB();
-  if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
-  db[username].blocked = true;
-  saveUsersDB(db);
+  const localDb = getUsersDB();
+  if(!localDb[username]) return {ok:false, msg:"المستخدم غير موجود"};
+  localDb[username].blocked = true;
+  /* Firestore أولاً */
+  if(usersFirebaseReady && db){
+    db.collection("users_db").doc(username).update({blocked: true})
+      .catch(e => console.warn("blockUser Firestore failed:", e));
+  }
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
   return {ok:true};
 }
 function unblockUser(username){
   const actor = getCurrentUsername();
   if(!canActorModerateTarget(actor, username)) return {ok:false, msg:"ليس لديك صلاحية لهذا الإجراء"};
-  const db = getUsersDB();
-  if(!db[username]) return {ok:false, msg:"المستخدم غير موجود"};
-  db[username].blocked = false;
-  saveUsersDB(db);
+  const localDb = getUsersDB();
+  if(!localDb[username]) return {ok:false, msg:"المستخدم غير موجود"};
+  localDb[username].blocked = false;
+  /* Firestore أولاً */
+  if(usersFirebaseReady && db){
+    db.collection("users_db").doc(username).update({blocked: false})
+      .catch(e => console.warn("unblockUser Firestore failed:", e));
+  }
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
   return {ok:true};
 }
 function deleteUserAccount(username){
@@ -5040,20 +5109,20 @@ function deleteUserAccount(username){
   const localDb = getUsersDB();
   if(!localDb[username]) return {ok:false, msg:"المستخدم غير موجود"};
   delete localDb[username];
-  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
-  /* حذف من Firestore مباشرة بدون batch عشان saveUsersDB هتكتب الكل */
+  /* احذف من Firestore أولاً كـ primary */
   if(usersFirebaseReady && db){
     db.collection("users_db").doc(username).delete()
       .catch(e => console.warn("Firestore delete user failed:", e));
   }
-  pushUsersDBToCloud(localDb);
+  /* حدّث الـ cache المحلي */
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
   return {ok:true};
 }
 
 function getCurrentUserRecord(){
-  const db = getUsersDB();
+  const usersDb = getUsersDB();
   const name = getCurrentUsername();
-  if(!name || !db[name]){
+  if(!name || !usersDb[name]){
     /* جلسة غير صالحة (مستخدم محذوف، أو بيانات قديمة من نسخة سابقة). بدل تعديل الصفحة الحالية
        أثناء تنفيذها (وده كان بيسبب انهيارات متتالية)، نعيد تحميل الصفحة نظيفًا فتظهر شاشة
        الدخول عبر المسار الطبيعي. الحارس (guard) يمنع تكرار إعادة التحميل. */
@@ -5064,7 +5133,7 @@ function getCurrentUserRecord(){
     }
     return { progress: defaultProgress() };
   }
-  if(db[name].blocked){
+  if(usersDb[name].blocked){
     /* اتحظر الحساب أثناء الجلسة — نخرجه فورًا بدل انتظار محاولة دخول جديدة */
     if(!window.__pa_session_reload_triggered){
       window.__pa_session_reload_triggered = true;
@@ -5074,18 +5143,24 @@ function getCurrentUserRecord(){
     return { progress: defaultProgress() };
   }
   // Ensure progress object has all default fields (merge to avoid missing keys like completed/examPassed)
-  if(!db[name].progress) db[name].progress = defaultProgress();
-  else db[name].progress = Object.assign(defaultProgress(), db[name].progress);
-  if(db[name].progress.certificateName === undefined) db[name].progress.certificateName = "";
-  if(db[name].progress.certificateEarnedAt === undefined) db[name].progress.certificateEarnedAt = null;
-  return db[name];
+  if(!usersDb[name].progress) usersDb[name].progress = defaultProgress();
+  else usersDb[name].progress = Object.assign(defaultProgress(), usersDb[name].progress);
+  if(usersDb[name].progress.certificateName === undefined) usersDb[name].progress.certificateName = "";
+  if(usersDb[name].progress.certificateEarnedAt === undefined) usersDb[name].progress.certificateEarnedAt = null;
+  return usersDb[name];
 }
 function saveCurrentUserRecord(rec){
-  const db = getUsersDB();
+  const localDb = getUsersDB();
   const name = getCurrentUsername();
   if(!name) return;
-  db[name] = rec;
-  saveUsersDB(db);
+  /* حدّث الـ cache المحلي */
+  localDb[name] = rec;
+  safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
+  /* اكتب على Firestore مباشرة (بدون batch كامل — أسرع وأدق) */
+  if(usersFirebaseReady && db){
+    db.collection("users_db").doc(name).set(rec, {merge:true})
+      .catch(e => console.warn("saveCurrentUserRecord Firestore failed:", e));
+  }
 }
 function resetProgress(){
   const rec = getCurrentUserRecord();
@@ -5703,11 +5778,13 @@ function getPlatformLock(){
   try{ return JSON.parse(safeStorage.get(DB_PLATFORM_LOCK_KEY)) || { lessonsLocked:false, chatLocked:false, examLocked:false }; }catch(e){ return { lessonsLocked:false, chatLocked:false, examLocked:false }; }
 }
 function savePlatformLock(lock){
-  safeStorage.set(DB_PLATFORM_LOCK_KEY, JSON.stringify(lock));
-  /* مزامنة مع Firestore لو متصل */
+  /* Firestore أولاً كـ primary */
   if(customExamFirebaseReady && db){
-    try{ db.collection("platform").doc("lock").set(lock); }catch(e){}
+    db.collection("platform").doc("lock").set(lock)
+      .catch(e => console.warn("savePlatformLock Firestore failed:", e));
   }
+  /* cache محلي */
+  safeStorage.set(DB_PLATFORM_LOCK_KEY, JSON.stringify(lock));
 }
 function isPlatformLessonsLocked(){
   /* المشرفون لا يتأثرون بالقفل */
@@ -5730,15 +5807,31 @@ function isEffectiveLessonsLocked(){ return isPlatformLessonsLocked() || isAutoL
 function isEffectiveChatLocked(){ return isPlatformChatLocked() || isAutoLockedByExam(); }
 
 function getCustomExam(){
-  try{ return JSON.parse(safeStorage.get(DB_CUSTOM_EXAM_KEY)) || null; }catch(e){ return null; }
+  try{
+    const parsed = JSON.parse(safeStorage.get(DB_CUSTOM_EXAM_KEY));
+    /* تحقق إن الـ object صالح — لازم يكون فيه questions array */
+    if(!parsed || typeof parsed !== "object") return null;
+    if(!Array.isArray(parsed.questions)) return null;
+    return parsed;
+  }catch(e){ return null; }
 }
 function saveCustomExam(exam){
+  /* Firestore أولاً كـ primary */
+  if(customExamFirebaseReady && db){
+    db.collection("platform").doc("custom_exam").set(exam || {})
+      .catch(e => console.warn("saveCustomExam Firestore failed:", e));
+  }
+  /* cache محلي */
   safeStorage.set(DB_CUSTOM_EXAM_KEY, JSON.stringify(exam));
-  pushCustomExamToCloud(exam);
 }
 function deleteCustomExamData(){
+  /* Firestore أولاً كـ primary */
+  if(customExamFirebaseReady && db){
+    db.collection("platform").doc("custom_exam").delete()
+      .catch(e => console.warn("deleteCustomExamData Firestore failed:", e));
+  }
+  /* cache محلي */
   safeStorage.remove(DB_CUSTOM_EXAM_KEY);
-  pushCustomExamToCloud(null);
 }
 function shuffleArray(arr){
   const a = arr.slice();
@@ -5755,6 +5848,11 @@ function getUsedQuestions(){
 }
 function saveUsedQuestions(arr){
   safeStorage.set(DB_USED_QUESTIONS_KEY, JSON.stringify(arr));
+  /* Firestore أولاً كـ primary */
+  if(customExamFirebaseReady && db){
+    db.collection("platform").doc("used_questions").set({ids: arr})
+      .catch(e => console.warn("saveUsedQuestions Firestore failed:", e));
+  }
 }
 
 function makeQuestionId(q){
@@ -6473,43 +6571,42 @@ function startUsersCloudListener(){
 }
 
 function pushUsersDBToCloud(usersData){
-  if(!usersFirebaseReady || !db) return;
-  /* نكتب كل مستخدم كـ document منفصل في collection users_db */
-  const batch = db.batch();
-  Object.entries(usersData).forEach(([username, userData]) => {
-    const ref = db.collection("users_db").doc(username);
-    batch.set(ref, userData, {merge: true});
-  });
-  batch.commit().catch(e => {
-    console.warn("Users cloud push failed:", e);
-    /* Fallback: اكتب المستخدم الحالي فقط */
-    try{
-      const me = getCurrentUsername();
-      if(me && usersData[me]){
-        db.collection("users_db").doc(me).set(usersData[me], {merge:true})
-          .catch(e2 => console.warn('Users partial push failed:', e2));
-      }
-    }catch(_){}
-  });
+  /* هذه الدالة محتفظ بيها للتوافق — saveUsersDB بتتعامل مع Firestore مباشرة الآن */
+  if(!usersFirebaseReady || !db || !usersData) return;
+  const me = getCurrentUsername();
+  if(me && usersData[me]){
+    db.collection("users_db").doc(me).set(usersData[me], {merge:true})
+      .catch(e => console.warn("pushUsersDBToCloud failed:", e));
+  }
 }
 
 /* ---- مزامنة الامتحان الشامل مع السحابة (نفس منطق مزامنة الحسابات) ---- */
 function syncCustomExamFromCloud(){
   return new Promise((resolve) => {
     if(!customExamFirebaseReady || !db){ resolve(false); return; }
-    db.collection("platform").doc("custom_exam").get()
+    const p1 = db.collection("platform").doc("custom_exam").get()
       .then(snap => {
         const remote = snap.exists ? snap.data() : null;
-        safeStorage.set(DB_CUSTOM_EXAM_KEY, JSON.stringify(remote || null));
-        resolve(true);
+        /* تحقق إن البيانات صالحة قبل الحفظ */
+        const valid = remote && Array.isArray(remote.questions) ? remote : null;
+        safeStorage.set(DB_CUSTOM_EXAM_KEY, JSON.stringify(valid));
       })
-      .catch(e => { console.warn("Custom exam cloud sync failed:", e); resolve(false); });
+      .catch(e => { console.warn("Custom exam cloud sync failed:", e); });
+    const p2 = db.collection("platform").doc("used_questions").get()
+      .then(snap => {
+        if(snap.exists && Array.isArray(snap.data().ids)){
+          safeStorage.set(DB_USED_QUESTIONS_KEY, JSON.stringify(snap.data().ids));
+        }
+      })
+      .catch(e => { console.warn("Used questions cloud sync failed:", e); });
+    Promise.all([p1, p2]).then(() => resolve(true)).catch(() => resolve(false));
   });
 }
 function pushCustomExamToCloud(exam){
+  /* محتفظ بيها للتوافق — saveCustomExam بتكتب على Firestore مباشرة الآن */
   if(!customExamFirebaseReady || !db) return;
   db.collection("platform").doc("custom_exam").set(exam || {})
-    .catch(e => console.warn("Custom exam cloud push failed:", e));
+    .catch(e => console.warn("pushCustomExamToCloud failed:", e));
 }
 
 /* ---- Fallback: تخزين محلي في حالة عدم إعداد Firebase ---- */
@@ -6719,14 +6816,14 @@ function selectAdminPanel(){
 
 function renderAdminPanel(){
   const lesson = document.getElementById("lesson");
-  const db = getUsersDB();
+  const usersDb = getUsersDB();
   const isMainAdmin = isCurrentUserMainAdmin();
   const actor = getCurrentUsername();
-  const usernames = Object.keys(db).filter(u => !ADMIN_ACCOUNTS.some(a => a.name === u)).sort();
+  const usernames = Object.keys(usersDb).filter(u => !ADMIN_ACCOUNTS.some(a => a.name === u)).sort();
 
   const rows = usernames.map(u => {
     const role = getUserRole(u);
-    const blocked = !!db[u].blocked;
+    const blocked = !!usersDb[u].blocked;
     const badge = role === "deputy" ? `<span class="chat-role-badge deputy">نائب مشرف</span>` : (role === "admin" ? `<span class="chat-role-badge admin">مشرف</span>` : `<span class="admin-role-plain">مستخدم</span>`);
     const blockedBadge = blocked ? `<span class="admin-blocked-badge">محظور</span>` : "";
     const roleActionBtn = isMainAdmin ? (
@@ -6753,7 +6850,7 @@ function renderAdminPanel(){
 
   const customExamForPanel = getCustomExam();
   let examSectionHtml = `<div class="admin-section-title">🏆 الامتحان الشامل</div>`;
-  if(customExamForPanel){
+  if(customExamForPanel && Array.isArray(customExamForPanel.questions)){
     const mcqN = customExamForPanel.questions.filter(q => q.type !== "essay").length;
     const essayN = customExamForPanel.questions.length - mcqN;
     examSectionHtml += `<div class="admin-exam-card">
@@ -7338,14 +7435,24 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   initChatBackend();
   if(statusEl) statusEl.textContent = "جارٍ مزامنة الحسابات مع السحابة…";
+
+  /* تنظيف الـ cache القديم/التالف من localStorage قبل المزامنة */
+  try{
+    const cachedExam = JSON.parse(safeStorage.get(DB_CUSTOM_EXAM_KEY));
+    if(cachedExam && !Array.isArray(cachedExam.questions)){
+      console.warn("Clearing invalid customExam cache from localStorage");
+      safeStorage.remove(DB_CUSTOM_EXAM_KEY);
+    }
+  }catch(e){ safeStorage.remove(DB_CUSTOM_EXAM_KEY); }
+
   await syncUsersFromCloud();
   await syncCustomExamFromCloud();
   ensureMainAdminAccount();
 
   const name = getCurrentUsername();
-  const db = getUsersDB();
+  const usersDb = getUsersDB();
   if(statusEl) statusEl.textContent = "جارٍ التحقق من حسابك…";
-  if(name && db[name]){
+  if(name && usersDb[name]){
     startApp();
     if(statusEl) statusEl.textContent = "أهلًا بعودتك!";
   } else {
