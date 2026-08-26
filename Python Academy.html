@@ -395,6 +395,33 @@
 
 
   /* ---------- Support ---------- */
+  .support-team{display:flex;flex-direction:column;gap:28px;margin-top:26px;}
+  .support-member-card{
+    border:1px solid rgba(99,102,241,.13);
+    border-radius:14px;
+    padding:22px 24px 20px;
+    background:rgba(99,102,241,.04);
+    transition:border-color .25s ease, box-shadow .25s ease;
+  }
+  .support-member-card:hover{
+    border-color:rgba(99,102,241,.28);
+    box-shadow:0 4px 24px rgba(99,102,241,.1);
+  }
+  .support-avatar{
+    width:46px;height:46px;border-radius:50%;
+    background:linear-gradient(135deg,#6366f1,#818cf8);
+    display:flex;align-items:center;justify-content:center;
+    font-size:18px;font-weight:700;color:#fff;
+    margin-bottom:10px;
+    box-shadow:0 2px 12px rgba(99,102,241,.3);
+  }
+  .support-member-name{
+    font-size:16px;font-weight:700;color:var(--text);
+    margin-bottom:14px;
+    font-family:'JetBrains Mono',monospace;
+  }
+  .support-member-contacts{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media (max-width:560px){.support-member-contacts{grid-template-columns:1fr;}}
   .support-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:26px;}
   @media (max-width:560px){.support-grid{grid-template-columns:1fr;}}
   .support-card{
@@ -7001,6 +7028,7 @@ function selectExam(cat){
   }
   renderExam(cat);
   buildSidebar();
+  collapseSidebarOnLesson();
 }
 
 function renderExam(cat){
@@ -7200,28 +7228,40 @@ function selectSupport(){
   buildSidebar();
 }
 
+const SUPPORT_TEAM = [
+  { name:"محمد عبدالناصر", email:"mahplayz99@gmail.com",    phone:"01107876271", avatar:"م" },
+  { name:"عبدالهادي محمود", email:"abdalhadymahmoud9@gmail.com", phone:"01099058532", avatar:"ع" },
+  { name:"محمود نصر",      email:"hyperdev239@gmail.com",   phone:"01158774060", avatar:"ن" },
+];
+
 function renderSupport(){
   const lesson = document.getElementById("lesson");
+  const cards = SUPPORT_TEAM.map(m => `
+    <div class="support-member-card">
+      <div class="support-avatar">${m.avatar}</div>
+      <div class="support-member-name">${m.name}</div>
+      <div class="support-member-contacts">
+        <a class="support-card" href="mailto:${m.email}">
+          <div class="support-icon">✉️</div>
+          <div class="support-label">البريد الإلكتروني</div>
+          <div class="support-value" dir="ltr">${m.email}</div>
+          <div class="support-cta">مراسلة عبر البريد ←</div>
+        </a>
+        <a class="support-card" href="tel:${m.phone}">
+          <div class="support-icon">📞</div>
+          <div class="support-label">رقم الهاتف</div>
+          <div class="support-value" dir="ltr">${m.phone}</div>
+          <div class="support-cta">اتصال مباشر ←</div>
+        </a>
+      </div>
+    </div>
+  `).join("");
+
   lesson.innerHTML = `
     <div class="lesson-eyebrow"># الدعم الفني</div>
     <h1 class="lesson-title">تحتاج مساعدة؟ احنا هنا 🛟</h1>
-    <div class="lesson-intro"><p>لو واجهتك أي مشكلة في المنصة، أو عندك استفسار عن الدروس أو الشهادة، تقدر تتواصل معانا مباشرة عن طريق إحدى الوسيلتين دول.</p></div>
-
-    <div class="support-grid">
-      <a class="support-card" href="mailto:${SUPPORT_EMAIL}">
-        <div class="support-icon">✉️</div>
-        <div class="support-label">البريد الإلكتروني</div>
-        <div class="support-value" dir="ltr">${SUPPORT_EMAIL}</div>
-        <div class="support-cta">مراسلة عبر البريد ←</div>
-      </a>
-      <a class="support-card" href="tel:${SUPPORT_PHONE}">
-        <div class="support-icon">📞</div>
-        <div class="support-label">رقم الهاتف</div>
-        <div class="support-value" dir="ltr">${SUPPORT_PHONE}</div>
-        <div class="support-cta">اتصال مباشر ←</div>
-      </a>
-    </div>
-
+    <div class="lesson-intro"><p>لو واجهتك أي مشكلة في المنصة، أو عندك استفسار عن الدروس أو الشهادة، تقدر تتواصل مع أي فرد من فريق الدعم مباشرة.</p></div>
+    <div class="support-team">${cards}</div>
     <div class="support-note">📌 فريق الدعم بيرد عادةً خلال يوم عمل واحد. اذكر اسم المستخدم بتاعك في الرسالة عشان نقدر نساعدك أسرع.</div>
   `;
   document.getElementById("content-scroll").scrollTop = 0;
