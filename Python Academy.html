@@ -3,12 +3,52 @@
 <head>
 <link rel="icon" type="image/png" sizes="32x32" href="./1.png">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0">
 <title>Python Academy</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script>
+/* ── Firebase SDK loader: يجرب gstatic أولاً، ولو اتبلك يحمّل من jsdelivr ── */
+(function(){
+  window.__firebaseSDKReady = false; /* علامة: Firebase App + Firestore كلهم جاهزين */
+
+  function loadScript(src, onload, onerror){
+    var s = document.createElement('script');
+    s.src = src; s.onload = onload; s.onerror = onerror;
+    document.head.appendChild(s);
+  }
+  var GSTATIC = "https://www.gstatic.com/firebasejs/9.23.0/";
+  var CDN2    = "https://cdn.jsdelivr.net/npm/firebase@9.23.0/";
+
+  function onFirestoreLoaded(){
+    /* تأكّد إن firebase.firestore فعلاً موجودة قبل ما نرفع العلامة */
+    if(typeof firebase !== "undefined" && typeof firebase.firestore === "function"){
+      window.__firebaseSDKReady = true;
+    } else {
+      /* انتظر لحظة وحاوِل تاني */
+      setTimeout(function(){
+        if(typeof firebase !== "undefined" && typeof firebase.firestore === "function"){
+          window.__firebaseSDKReady = true;
+        }
+      }, 300);
+    }
+  }
+
+  function loadFirestore(){
+    loadScript(GSTATIC + "firebase-firestore-compat.js", onFirestoreLoaded,
+      function(){ loadScript(CDN2 + "compat/firestore/index.js", onFirestoreLoaded, function(){
+        console.warn("Firebase Firestore SDK failed to load from both CDNs");
+      }); });
+  }
+
+  loadScript(GSTATIC + "firebase-app-compat.js", function(){ loadFirestore(); },
+    function(){
+      loadScript(CDN2 + "compat/app/index.js", function(){ loadFirestore(); }, function(){
+        console.warn("Firebase App SDK failed to load from both CDNs");
+      });
+    });
+})();
+</script>
 <style>
 :root{
     /* ── Dark theme – warm slate (easy on eyes) ── */
@@ -87,6 +127,16 @@
   }
   *{box-sizing:border-box;}
   html,body{height:100%;}
+  /* Better touch experience */
+  button, a, [role="button"]{
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  /* Smooth scrolling on iOS */
+  #content-scroll, #file-tree, .chat-messages{
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
   body{
     margin:0;
     background:var(--bg);
@@ -276,6 +326,8 @@
     padding:7px 9px;color:var(--text-dim);font-size:17px;
     border-radius:8px;
     transition:background .15s,color .15s;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
   }
   #menu-toggle:hover{background:rgba(124,134,212,.10);color:var(--blue-light);}
   .tab{
@@ -497,6 +549,35 @@
   .chat-send-btn:hover{transform:translateY(-2px) scale(1.03);filter:brightness(1.10);box-shadow:0 8px 20px rgba(124,134,212,.38);}
   .chat-send-btn:active{transform:translateY(0) scale(.97);}
   .chat-note{margin-top:12px;font-size:12px;color:var(--text-mute);text-align:center;}
+
+  /* ---------- Chat notification badge ---------- */
+  .chat-notif-badge{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-width:19px;height:19px;padding:0 6px;
+    border-radius:999px;
+    background:linear-gradient(135deg,#e05858,#c93f3f);
+    color:#fff !important;font-size:10px;font-weight:800;
+    font-family:'JetBrains Mono',monospace;
+    box-shadow:0 0 10px rgba(224,88,88,.6), 0 2px 6px rgba(0,0,0,.35);
+    animation:notif-pop .3s cubic-bezier(.34,1.56,.64,1) both;
+    flex:0 0 auto;
+    margin-right:auto; /* يدفع البادج لأقصى اليسار (RTL=اليمين) */
+    margin-left:4px;
+    position:relative;
+    pointer-events:none;
+    line-height:1;
+    z-index:2;
+  }
+  .chat-notif-badge[style*="none"]{ display:none !important; }
+  @keyframes notif-pop{
+    from{opacity:0;transform:scale(0);}
+    to{opacity:1;transform:scale(1);}
+  }
+  @keyframes notif-pulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(224,88,88,.7),0 0 10px rgba(224,88,88,.6);}
+    60%{box-shadow:0 0 0 6px rgba(224,88,88,0),0 0 10px rgba(224,88,88,.6);}
+  }
+  .chat-notif-badge:not([style*="none"]){ animation:notif-pop .3s cubic-bezier(.34,1.56,.64,1) both, notif-pulse 2s 1s ease-in-out infinite; }
 
   /* ---------- role badges + moderation ---------- */
   .chat-role-badge{
@@ -1578,121 +1659,364 @@
   #sidebar-backdrop{display:none;}
 
   /* ---- Sidebar collapsed (desktop) ---- */
-  #sidebar.collapsed{
-    transform:translateX(100%);
-    width:0;flex-basis:0;
-    transition:transform .28s cubic-bezier(.4,0,.2,1), width .28s cubic-bezier(.4,0,.2,1), flex-basis .28s cubic-bezier(.4,0,.2,1);
-  }
-  #app.sidebar-collapsed #sidebar{transform:translateX(calc(var(--sidebar-w) + 20px));width:0;flex-basis:0;min-width:0;overflow:hidden;}
-  #app.sidebar-collapsed #menu-toggle{display:flex !important;align-items:center;justify-content:center;}
-  @media (min-width:861px){
-    /* On desktop: only show when sidebar is collapsed */
-    #menu-toggle{display:none;}
-    #app.sidebar-collapsed #menu-toggle{display:flex !important;}
-  }
-  #menu-toggle{
-    display:none;/* hidden by default; shown when sidebar-collapsed or on mobile */
-    flex:0 0 auto;
-    padding:7px 10px;color:var(--text-dim);font-size:17px;
-    border-radius:8px;
-    transition:background .15s,color .15s;
-  }
+  /* ══════════════════════════════════════════════════════
+     RESPONSIVE SYSTEM — شامل جميع الأجهزة والمتصفحات
+     ══════════════════════════════════════════════════════
+     Breakpoints:
+       xs  : < 360px   (هواتف صغيرة جداً)
+       sm  : 360-479px (هواتف عادية)
+       md  : 480-639px (هواتف كبيرة)
+       lg  : 640-859px (تابلت صغير / landscape phone)
+       xl  : 860-1099px (تابلت كبير / iPad / laptop صغير)
+       2xl : 1100-1399px (laptop عادي)
+       3xl : ≥ 1400px  (desktop كبير)
+  ══════════════════════════════════════════════════════ */
 
-  /* hamburger icon styling upgrade */
-  #menu-toggle .hb-icon{
-    display:flex;flex-direction:column;gap:4px;width:18px;
-  }
-  #menu-toggle .hb-icon span{
-    display:block;height:2px;border-radius:2px;
-    background:currentColor;
-    transition:transform .22s ease, opacity .18s ease, width .2s ease;
-  }
-  #menu-toggle .hb-icon span:nth-child(2){width:75%;}
-  #menu-toggle:hover .hb-icon span{background:var(--blue);}
-  #app.sidebar-collapsed #menu-toggle:hover .hb-icon span:nth-child(1){transform:translateY(6px) rotate(45deg);}
-  #app.sidebar-collapsed #menu-toggle:hover .hb-icon span:nth-child(2){opacity:0;width:0;}
-  #app.sidebar-collapsed #menu-toggle:hover .hb-icon span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
-
-  /* ---------- Responsive breakpoints ---------- */
-
+  /* ── Desktop كبير ≥ 1400px ── */
   @media (min-width: 1400px){
     :root{ --sidebar-w:324px; }
     #lesson{max-width:940px;}
   }
 
-  @media (max-width: 1100px) and (min-width: 861px){
-    :root{ --sidebar-w:246px; }
-    .file-name{font-size:12.5px;}
-    #lesson{max-width:720px;}
+  /* ── Laptop 1100–1399px ── */
+  @media (max-width: 1399px) and (min-width: 1100px){
+    :root{ --sidebar-w:276px; }
+    #lesson{max-width:800px;}
   }
 
-  @media (max-width: 860px){
-    :root{ --sidebar-w:82vw; }
+  /* ── Tablet landscape / laptop صغير 860–1099px ── */
+  @media (max-width: 1099px) and (min-width: 860px){
+    :root{ --sidebar-w:236px; }
+    .file-name{font-size:12px;}
+    .brand-stats, .brand-sub{font-size:10px;}
+    #lesson{max-width:680px;}
+    .code-input{font-size:13.5px;}
+  }
+
+  /* ── Tablet / iPad / Mobile landscape < 860px ── */
+  @media (max-width: 859px){
+    :root{
+      --sidebar-w: min(320px, 80vw);
+      --tabbar-h: 46px;
+    }
+
+    /* Sidebar: drawer floating over content */
     #sidebar{
-      position:fixed;top:calc(3px + var(--tabbar-h));bottom:0;right:0;z-index:40;
-      transform:translateX(100%);
-      transition:transform .25s cubic-bezier(.4,0,.2,1);
-      box-shadow:-10px 0 30px rgba(79,126,247,.15);
-      width:min(340px, 82vw);flex-basis:min(340px, 82vw);
+      position: fixed;
+      top: calc(2px + var(--tabbar-h));
+      bottom: 0;
+      right: 0;
+      z-index: 40;
+      width: var(--sidebar-w) !important;
+      flex-basis: var(--sidebar-w) !important;
+      min-width: 0 !important;
+      transform: translateX(calc(var(--sidebar-w) + 2px));
+      transition: transform .28s cubic-bezier(.4,0,.2,1), box-shadow .28s ease;
+      box-shadow: none;
+      border-left: 1px solid var(--border);
+      will-change: transform;
     }
-    #sidebar.open{transform:translateX(0);}
-    #menu-toggle{display:flex;align-items:center;justify-content:center;}
-    #lesson{padding:26px 20px 70px;}
-    .lesson-title{font-size:clamp(21px,5vw,24px);}
+    #sidebar.open{
+      transform: translateX(0);
+      box-shadow: -8px 0 40px rgba(0,0,0,.5);
+    }
+
+    /* sidebar-collapsed class: same as closed on mobile */
+    #app.sidebar-collapsed #sidebar{
+      transform: translateX(calc(var(--sidebar-w) + 2px)) !important;
+      width: var(--sidebar-w) !important;
+      flex-basis: var(--sidebar-w) !important;
+      border: 1px solid var(--border) !important;
+    }
+
+    /* Main takes full width */
+    #main{ width: 100%; }
+
+    /* Hamburger always visible on mobile */
+    #menu-toggle{
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Backdrop */
     #sidebar-backdrop{
-      display:block;position:fixed;inset:calc(3px + var(--tabbar-h)) 0 0 0;
-      background:rgba(0,0,0,0);z-index:39;
-      pointer-events:none;
-      transition:background .25s ease;
+      display: block;
+      position: fixed;
+      inset: calc(2px + var(--tabbar-h)) 0 0 0;
+      background: transparent;
+      z-index: 39;
+      pointer-events: none;
+      transition: background .28s ease;
     }
-    #sidebar-backdrop.show{background:rgba(5,8,18,.65);pointer-events:auto;backdrop-filter:blur(4px);}
-    .lesson-footer{gap:10px;}
-    .nav-btn span, .nav-btn{font-size:12px;}
-    .cell-bar{padding:8px 12px;}
+    #sidebar-backdrop.show{
+      background: rgba(5,8,18,.7);
+      pointer-events: auto;
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+    }
+
+    /* Lesson */
+    #lesson{ padding: 24px 18px 70px; }
+    .lesson-title{ font-size: clamp(19px, 4.5vw, 24px); }
+    .lesson-footer{ gap: 10px; }
+    .nav-btn span, .nav-btn{ font-size: 12px; }
+    .cell-bar{ padding: 8px 12px; flex-wrap: wrap; gap: 6px; }
+
+    /* Chat */
+    .chat-messages{ max-height: 340px; min-height: 180px; }
+
+    /* Auth */
+    .auth-left{ display: none !important; }
+    .auth-card{ flex-basis: auto !important; max-width: 420px; width: 100%; }
+
+    /* Admin */
+    .admin-panel{ padding: 16px 14px; }
   }
 
-  @media (max-width: 640px){
-    #lesson{padding:22px 16px 65px;}
-    .lesson-intro p, .block p, .exercise p{font-size:14.5px;line-height:1.9;}
-    .block{margin-top:28px;}
-    .summary-box, .exercise{padding-left:16px;padding-right:16px;}
-    .lesson-footer{justify-content:center;text-align:center;}
-    .lesson-footer .nav-btn{flex:1 1 auto;justify-content:center;min-width:100px;}
-    .lesson-footer .complete-btn{order:-1;flex:1 1 100%;justify-content:center;text-align:center;}
-    .auth-card{border-radius:16px;}
+  /* ── iPad / تابلت 640–859px ── */
+  @media (max-width: 859px) and (min-width: 640px){
+    :root{ --sidebar-w: min(300px, 75vw); }
+    #lesson{ padding: 24px 20px 70px; }
+    .lesson-title{ font-size: clamp(20px, 4vw, 24px); }
+    .chat-messages{ max-height: 380px; }
   }
 
-  @media (max-width: 480px){
-    .lesson-title{font-size:19px;}
-    #lesson{padding:18px 14px 60px;}
-    .block p, .exercise p{font-size:14px;line-height:1.85;}
-    .cell-label{display:none;}
-    .cell-btn{font-size:11px;padding:6px 10px;}
-    .code-input{font-size:13px;padding:14px 14px;min-height:100px;}
-    .output-text, .expected-text{font-size:12px;}
-    .summary-box li{font-size:13px;}
-    #statusbar{font-size:9.5px;padding:0 8px;gap:6px;}
-    #statusbar .grp{gap:8px;}
+  /* ── هاتف كبير 480–639px ── */
+  @media (max-width: 639px){
+    :root{
+      --sidebar-w: min(290px, 82vw);
+      --tabbar-h: 44px;
+      --statusbar-h: 24px;
+    }
+
+    #lesson{ padding: 20px 14px 65px; }
+    .lesson-title{ font-size: clamp(17px, 5vw, 21px); }
+    .lesson-intro p, .block p, .exercise p{ font-size: 14.5px; line-height: 1.88; }
+    .block{ margin-top: 26px; }
+    .summary-box, .exercise{ padding-left: 14px; padding-right: 14px; }
+    .lesson-footer{
+      justify-content: center;
+      text-align: center;
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .lesson-footer .nav-btn{
+      flex: 1 1 auto;
+      justify-content: center;
+      min-width: 0;
+    }
+    .lesson-footer .complete-btn{
+      order: -1;
+      width: 100%;
+      justify-content: center;
+      text-align: center;
+    }
+    .auth-card{ border-radius: 16px; padding: 28px 20px 22px; }
+    .auth-split{ padding: 16px; gap: 0; }
+
+    /* Code cell */
+    .code-input{ font-size: 13px; padding: 14px; min-height: 100px; }
+    .cell-btn{ font-size: 11px; padding: 6px 10px; }
+    .cell-label{ display: none; }
+    .output-text, .expected-text{ font-size: 12px; }
+    .summary-box li{ font-size: 13px; }
+
+    /* Status bar */
+    #statusbar{ font-size: 9.5px; padding: 0 8px; gap: 6px; height: var(--statusbar-h); }
+    #statusbar .grp{ gap: 8px; }
     #statusbar .grp:last-child span:nth-child(2),
-    #statusbar .grp:last-child span:nth-child(3){display:none;}
+    #statusbar .grp:last-child span:nth-child(3){ display: none; }
     #py-status{
-      max-width:150px;overflow:hidden;text-overflow:ellipsis;
-      white-space:nowrap;display:inline-block;vertical-align:middle;
+      max-width: 130px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: inline-block;
+      vertical-align: middle;
     }
-    #certificate{padding:24px 14px;}
-    .cert-brand{margin-bottom:16px;}
-    .cert-footer{margin-top:30px;}
+
+    /* Certificate */
+    #certificate{ padding: 22px 12px 18px; }
+    .cert-brand{ margin-bottom: 14px; }
+    .cert-footer{ margin-top: 28px; }
+
+    /* Chat */
+    .chat-messages{ max-height: 280px; min-height: 160px; }
+    .chat-send-btn{ padding: 10px 14px; font-size: 12.5px; }
+    .chat-msg{ max-width: 90%; }
+
+    /* Tabbar */
+    #tabbar{ padding: 0 8px; gap: 4px; }
+    .tab{ padding: 7px 12px; font-size: 11.5px; }
+
+    /* Support */
+    .support-member-contacts{ grid-template-columns: 1fr; }
+    .support-grid{ grid-template-columns: 1fr; }
+
+    /* Explain walk */
+    .explain-walk-row{ grid-template-columns: 1fr; gap: 4px; }
+    .explain-walk-row code{ white-space: normal; }
   }
 
-  @media (max-height: 420px) and (max-width: 900px){
-    .brand{padding:12px 16px 10px;}
-    .brand-stats, .brand-sub{display:none;}
-    #lesson{padding-top:16px;}
-    .lesson-footer{margin-top:24px;padding-top:14px;}
+  /* ── هاتف صغير < 480px ── */
+  @media (max-width: 479px){
+    :root{
+      --sidebar-w: 88vw;
+      --tabbar-h: 42px;
+      --statusbar-h: 22px;
+    }
+
+    html, body{ font-size: 15px; }
+
+    #lesson{ padding: 16px 12px 60px; }
+    .lesson-title{ font-size: clamp(16px, 5.5vw, 19px); }
+    .block p, .exercise p{ font-size: 14px; line-height: 1.83; }
+
+    /* Auth card full width */
+    #auth-overlay{ padding: 12px; }
+    .auth-card{
+      padding: 22px 16px 18px;
+      border-radius: 14px;
+      max-width: 100%;
+      flex-basis: 100% !important;
+    }
+    .auth-title{ font-size: 16px; }
+    .auth-sub{ font-size: 12px; }
+
+    /* Tabbar compact */
+    .tab{ padding: 6px 10px; font-size: 11px; }
+    #tab-name{ max-width: 140px; }
+
+    /* Status bar minimal */
+    #statusbar{ padding: 0 6px; }
+
+    /* Code */
+    .code-input{ font-size: 12.5px; padding: 12px; }
+    .cell-actions{ gap: 4px; }
+    .run-btn{ padding: 6px 12px; font-size: 11px; }
+
+    /* Chat */
+    .chat-input{ font-size: 13px; padding: 9px 11px; }
+    .chat-msg-text{ font-size: 13px; }
+    .chat-msg{ max-width: 94%; }
+    .chat-send-btn{ padding: 9px 12px; font-size: 12px; }
+    .chat-input-bar{ padding: 9px; gap: 6px; }
+
+    /* Brand sidebar */
+    .brand{ padding: 14px 14px 12px; }
+    .brand-mark{ font-size: 12.5px; }
+    .file-item{ padding: 8px 10px; font-size: 12px; }
+
+    /* Support */
+    .support-card{ padding: 16px 14px; }
+    .support-member-card{ padding: 16px 14px; }
   }
 
+  /* ── هاتف صغير جداً < 360px ── */
+  @media (max-width: 359px){
+    :root{ --sidebar-w: 94vw; }
+
+    #auth-overlay{ padding: 8px; }
+    .auth-card{ padding: 18px 12px 16px; border-radius: 12px; }
+    .auth-title{ font-size: 14.5px; letter-spacing: .5px; }
+
+    .tab{ padding: 5px 8px; font-size: 10.5px; }
+    #tab-name{ max-width: 110px; }
+
+    .code-input{ font-size: 12px; padding: 10px 11px; }
+    .cell-btn{ padding: 5px 8px; font-size: 10.5px; }
+
+    .chat-msg-text{ font-size: 12.5px; }
+    .chat-send-btn{ padding: 8px 10px; }
+
+    .lesson-title{ font-size: 15px; }
+    #lesson{ padding: 14px 10px 55px; }
+  }
+
+  /* ── Landscape على هواتف (height صغير) ── */
+  @media (max-height: 500px) and (max-width: 900px){
+    :root{ --tabbar-h: 38px; --statusbar-h: 20px; }
+    .brand{ padding: 10px 14px 8px; }
+    .brand-stats, .brand-sub{ display: none; }
+    #lesson{ padding-top: 12px; padding-bottom: 50px; }
+    .lesson-footer{ margin-top: 20px; padding-top: 12px; }
+    #auth-overlay{ align-items: flex-start; padding-top: 10px; }
+    .auth-card{ padding: 18px 20px 16px; }
+    .auth-logo{ margin-bottom: 10px; }
+    .auth-logo img, .auth-logo svg{ width: 44px; height: 44px; }
+    .auth-sub{ margin: 6px 0 14px; }
+    .chat-messages{ max-height: 200px; min-height: 100px; }
+  }
+
+  /* ── iPad Pro / تابلت كبير portrait 768px–1024px ── */
+  @media (min-width: 768px) and (max-width: 859px){
+    :root{ --sidebar-w: min(280px, 70vw); }
+    .auth-left{ display: none !important; }
+    .auth-card{ max-width: 460px; }
+  }
+
+  /* ── Desktop toggle: sidebar collapsed ── */
+  @media (min-width: 860px){
+    #menu-toggle{ display: none; }
+    #app.sidebar-collapsed #menu-toggle{ display: flex !important; align-items: center; justify-content: center; }
+    #app.sidebar-collapsed #sidebar{
+      transform: translateX(calc(var(--sidebar-w) + 20px));
+      flex-basis: 0 !important;
+      width: 0 !important;
+      min-width: 0 !important;
+      overflow: hidden;
+      border: none;
+    }
+  }
+
+  /* ── Auth responsive ── */
+  @media (min-width: 780px){
+    .auth-left{ display: flex !important; }
+  }
+  @media (max-width: 779px){
+    .auth-split{ flex-direction: column; align-items: center; }
+    .auth-left{ display: none !important; }
+  }
+
+  /* ── Loading screen responsive ── */
+  @media (max-width: 480px){
+    .loading-bar-track{ width: 180px; }
+    .loading-tip{ max-width: 100%; font-size: 12px; padding: 10px 14px; }
+    .loading-brand{ font-size: 15px; }
+  }
+
+  /* ── Print ── */
+  @media print{
+    #sidebar, #tabbar, #statusbar, #menu-toggle, #sidebar-backdrop{ display: none !important; }
+    #main{ width: 100% !important; }
+    #lesson{ max-width: 100% !important; padding: 0 !important; }
+  }
+
+  /* ── Reduced motion ── */
   @media (prefers-reduced-motion: reduce){
-    *{transition:none !important; animation:none !important;}
+    *, *::before, *::after{
+      transition-duration: .01ms !important;
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+    .run-btn{ animation: none; }
+    .loading-logo{ animation: none; }
+    .loading-bar-fill{ animation: none; left: 0; width: 60%; }
+    .loading-status .dot{ animation: none; }
+  }
+
+  /* ── Touch devices: remove hover side effects ── */
+  @media (hover: none) and (pointer: coarse){
+    .nav-btn:hover,
+    .complete-btn:hover,
+    .file-item:hover,
+    .cell-btn:hover,
+    .support-card:hover,
+    .chat-send-btn:hover{
+      transform: none;
+    }
+    .run-btn:hover{ transform: none; filter: none; }
   }
 
   /* ══════════════ LIGHT THEME – warm cream ══════════════ */
@@ -5721,23 +6045,13 @@ function getUsersDB(){
 function saveUsersDB(usersData){
   /* الـ localStorage كـ cache فقط */
   safeStorage.set(DB_USERS_KEY, JSON.stringify(usersData));
-  /* Firestore هو المصدر الرئيسي — نكتب كل مستخدم كـ document */
+  /* Firestore — كل مستخدم يكتب doc نفسه فقط */
   if(usersFirebaseReady && db){
-    const batch = db.batch();
-    Object.entries(usersData).forEach(([username, userData]) => {
-      const ref = db.collection("users_db").doc(username);
-      batch.set(ref, userData, {merge: true});
-    });
-    batch.commit().catch(e => {
-      console.warn("saveUsersDB batch failed, retrying single user:", e);
-      try{
-        const me = getCurrentUsername();
-        if(me && usersData[me]){
-          db.collection("users_db").doc(me).set(usersData[me], {merge:true})
-            .catch(e2 => console.warn("saveUsersDB single user failed:", e2));
-        }
-      }catch(_){}
-    });
+    const me = getCurrentUsername();
+    if(me && usersData[me]){
+      db.collection("users_db").doc(me).set(usersData[me], {merge:true})
+        .catch(e => console.warn("saveUsersDB failed:", e));
+    }
   }
 }
 
@@ -5747,63 +6061,95 @@ function defaultProgress(){
 
 async function registerUser(username, password){
   username = (username || "").trim();
-  const localDb = getUsersDB();
   if(!username || !password) return {ok:false, msg:"الرجاء إدخال اسم مستخدم وكلمة مرور"};
-  if(password.length < 4) return {ok:false, msg:"كلمة المرور يجب ألا تقل عن 4 أحرف"};
+  if(password.length < 4)   return {ok:false, msg:"كلمة المرور يجب ألا تقل عن 4 أحرف"};
+  if(username.length > 50)  return {ok:false, msg:"اسم المستخدم طويل جداً (الحد 50 حرف)"};
   if(ADMIN_ACCOUNTS.some(a => a.name === username)) return {ok:false, msg:"اسم المستخدم محجوز"};
 
-  /* تحقق من السحابة أولاً لو متصل */
+  /* ── تحقق من التكرار: السحابة أولاً ثم المحلي ── */
   if(usersFirebaseReady && db){
     try{
       const snap = await db.collection("users_db").doc(username).get();
       if(snap.exists) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
-    }catch(e){ /* fallback to local check */ }
+    }catch(e){ console.warn("Register existence check failed, checking local:", e); }
   }
+  const localDb = getUsersDB();
   if(localDb[username]) return {ok:false, msg:"اسم المستخدم موجود مسبقًا"};
 
-  const newUser = { passHash: simpleHash(password), createdAt: Date.now(), progress: defaultProgress(), role: "user" };
+  const h = simpleHash(password);
+  /* ── بنية الـ document متوافقة 100% مع Firestore rules ──
+     rules تشترط وجود 'username' و'password' كحقول في الـ document */
+  const newUser = {
+    username:  username,   /* مطلوب بالـ rules: hasAll(['username','password']) */
+    password:  h,          /* مطلوب بالـ rules — نحفظ الـ hash مش الكلمة الأصلية */
+    passHash:  h,          /* للتوافق مع loginUser */
+    createdAt: Date.now(),
+    progress:  defaultProgress(),
+    role:      "user",
+    blocked:   false
+  };
 
-  /* احفظ في Firestore أولاً كـ primary */
+  /* ── احفظ في Firestore ── */
+  let cloudSaved = false;
   if(usersFirebaseReady && db){
     try{
       await db.collection("users_db").doc(username).set(newUser);
+      cloudSaved = true;
     }catch(e){
-      console.warn("Register Firestore write failed, saving locally:", e);
+      console.warn("Register: Firestore write failed — saving locally only:", e);
     }
   }
-  /* حدّث الـ cache المحلي */
+
+  /* ── احفظ محلياً دائماً (backup + offline support) ── */
   localDb[username] = newUser;
   safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
-  return {ok:true};
+
+  /* ── سجّل الجلسة مباشرة بعد التسجيل (بدون loginUser ثاني) ── */
+  safeStorage.set(SESSION_KEY, username);
+
+  return {ok:true, cloudSaved};
 }
+
 async function loginUser(username, password){
   username = (username || "").trim();
+  if(!username || !password) return {ok:false, msg:"الرجاء إدخال اسم مستخدم وكلمة مرور"};
 
-  /* جلب بيانات المستخدم من Firestore أولاً لو متصل */
+  const h = simpleHash(password);
   let userRecord = null;
+
+  /* ── جلب من Firestore أولاً (المصدر الأساسي) ── */
   if(usersFirebaseReady && db){
     try{
       const snap = await db.collection("users_db").doc(username).get();
       if(snap.exists){
         userRecord = snap.data();
-        /* حدّث النسخة المحلية */
-        const localDb = getUsersDB();
-        localDb[username] = userRecord;
-        safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
+        /* تأكد إن passHash موجود (حسابات قديمة ممكن يكون عندها password بس) */
+        if(!userRecord.passHash && userRecord.password){
+          userRecord.passHash = userRecord.password;
+        }
+        /* حدّث النسخة المحلية بأحدث بيانات السحابة */
+        const ldb = getUsersDB();
+        ldb[username] = userRecord;
+        safeStorage.set(DB_USERS_KEY, JSON.stringify(ldb));
       }
-    }catch(e){ console.warn("Login cloud fetch failed, using local:", e); }
+    }catch(e){ console.warn("Login: cloud fetch failed, falling back to local:", e); }
   }
 
-  /* fallback: النسخة المحلية */
+  /* ── fallback: النسخة المحلية ── */
   if(!userRecord){
-    const localDb = getUsersDB();
-    userRecord = localDb[username] || null;
+    const ldb = getUsersDB();
+    userRecord = ldb[username] || null;
+    if(userRecord && !userRecord.passHash && userRecord.password){
+      userRecord.passHash = userRecord.password;
+    }
   }
 
-  if(!userRecord) return {ok:false, msg:"لا يوجد مستخدم بهذا الاسم"};
-  if(!userRecord.passHash) return {ok:false, msg:"بيانات الحساب تالفة، تواصل مع المشرف"};
-  if(userRecord.passHash !== simpleHash(password)) return {ok:false, msg:"كلمة المرور غير صحيحة"};
-  if(userRecord.blocked) return {ok:false, msg:"تم حظر هذا الحساب. تواصل مع إدارة المنصة إذا كنت تعتقد أن هذا خطأ."};
+  if(!userRecord)                               return {ok:false, msg:"لا يوجد مستخدم بهذا الاسم"};
+  if(!userRecord.passHash && !userRecord.password) return {ok:false, msg:"بيانات الحساب تالفة، تواصل مع المشرف"};
+  const storedHash = userRecord.passHash || userRecord.password;
+  if(storedHash !== h)                          return {ok:false, msg:"كلمة المرور غير صحيحة"};
+  if(userRecord.blocked)                        return {ok:false, msg:"تم حظر هذا الحساب. تواصل مع إدارة المنصة إذا كنت تعتقد أن هذا خطأ."};
+
   safeStorage.set(SESSION_KEY, username);
   return {ok:true};
 }
@@ -5843,10 +6189,18 @@ function ensureMainAdminAccount(){
   const localDb = getUsersDB();
   let changed = false;
   ADMIN_ACCOUNTS.forEach(({ name, pass }) => {
+    const h = simpleHash(pass);
     if(!localDb[name]){
-      localDb[name] = { passHash: simpleHash(pass), createdAt: Date.now(), progress: fullAdminProgress(name), role: "admin" };
+      localDb[name] = {
+        username: name, password: h, passHash: h,
+        createdAt: Date.now(), progress: fullAdminProgress(name),
+        role: "admin", blocked: false
+      };
       changed = true;
     } else {
+      if(!localDb[name].username){ localDb[name].username = name; changed = true; }
+      if(!localDb[name].password){ localDb[name].password = localDb[name].passHash || h; changed = true; }
+      if(!localDb[name].passHash){ localDb[name].passHash = localDb[name].password || h; changed = true; }
       if(localDb[name].role !== "admin"){ localDb[name].role = "admin"; changed = true; }
       const missingChapters = chapters.some(ch => !localDb[name].progress.completed.includes(ch.file));
       const missingExams = categoryOrder.some(cat => !localDb[name].progress.examPassed[cat]);
@@ -5941,11 +6295,17 @@ function getCurrentUserRecord(){
   if(!name || !usersDb[name]){
     /* جلسة غير صالحة (مستخدم محذوف، أو بيانات قديمة من نسخة سابقة). بدل تعديل الصفحة الحالية
        أثناء تنفيذها (وده كان بيسبب انهيارات متتالية)، نعيد تحميل الصفحة نظيفًا فتظهر شاشة
-       الدخول عبر المسار الطبيعي. الحارس (guard) يمنع تكرار إعادة التحميل. */
+       الدخول عبر المسار الطبيعي. الحارس (guard) يمنع تكرار إعادة التحميل.
+       ملاحظة: لو المزامنة السحابية لسه شغالة، نتجاهل الـ reload عشان منعملش حلقة مفرغة. */
+    if(name && !window.__pa_cloud_sync_done){
+      /* الـ cloud sync لسه مخلصتش — ممكن البيانات مش اتحملتش بعد، مش محتاجين reload */
+      return { progress: defaultProgress() };
+    }
     if(!window.__pa_session_reload_triggered){
       window.__pa_session_reload_triggered = true;
       safeStorage.remove(SESSION_KEY);
-      location.reload();
+      /* تأخير بسيط عشان نتأكد إن المزامنة خلصت فعلاً قبل الـ reload */
+      setTimeout(function(){ location.reload(); }, 500);
     }
     return { progress: defaultProgress() };
   }
@@ -5969,10 +6329,18 @@ function saveCurrentUserRecord(rec){
   const localDb = getUsersDB();
   const name = getCurrentUsername();
   if(!name) return;
-  /* حدّث الـ cache المحلي */
+
+  // ضمان وجود الحقول المطلوبة بالـ Firestore rules دائماً
+  const original = localDb[name] || {};
+  if(!rec.username)  rec.username = original.username || name;
+  if(!rec.password)  rec.password = original.password || original.passHash || "";
+  if(!rec.passHash)  rec.passHash = original.passHash || rec.password;
+
+  // حدّث الـ cache المحلي
   localDb[name] = rec;
   safeStorage.set(DB_USERS_KEY, JSON.stringify(localDb));
-  /* اكتب على Firestore مباشرة (بدون batch كامل — أسرع وأدق) */
+
+  // اكتب على Firestore — merge:true عشان مش يمسح حقول تانية
   if(usersFirebaseReady && db){
     db.collection("users_db").doc(name).set(rec, {merge:true})
       .catch(e => console.warn("saveCurrentUserRecord Firestore failed:", e));
@@ -6055,7 +6423,10 @@ function buildSidebar(){
   const chatBtn = document.createElement("button");
   chatBtn.className = "file-item" + (currentView === "chat" ? " active" : "");
   const chatLockLabel = isEffectiveChatLocked() ? "🔒 الشات (مقفل)" : "community_chat.py";
-  chatBtn.innerHTML = `<span class="file-dot"></span><span class="file-num">💬</span><span class="file-name">${chatLockLabel}</span><span class="file-check"></span>`;
+  const _badgeHtml = (_chatNotifCount > 0 && currentView !== "chat")
+    ? `<span class="chat-notif-badge" data-chat-notif-badge>${_chatNotifCount > 99 ? "99+" : _chatNotifCount}</span>`
+    : `<span class="chat-notif-badge" data-chat-notif-badge style="display:none"></span>`;
+  chatBtn.innerHTML = `<span class="file-dot"></span><span class="file-num">💬</span><span class="file-name">${chatLockLabel}</span>${_badgeHtml}`;
   chatBtn.addEventListener("click", () => { selectChat(); closeSidebarMobile(); });
   tree.appendChild(chatBtn);
 
@@ -7289,6 +7660,105 @@ let _chatFsUnsub = null;
 let _usersFsUnsub = null;
 let _platformLockFsUnsub = null;
 
+/* ── نظام إشعارات الشات ── */
+let _chatNotifUnsub = null;
+let _chatNotifCount = 0;
+let _chatLastSeenTs = 0;
+let _chatNotifInterval = null;
+const CHAT_LAST_SEEN_KEY = "pa_chat_last_seen_v1";
+
+function loadChatLastSeen(){
+  try{
+    const v = parseInt(safeStorage.get(CHAT_LAST_SEEN_KEY)||"0",10)||0;
+    /* لو مفيش سجل قديم، اعتبر كل الرسائل الموجودة "مقروءة" حتى الآن */
+    _chatLastSeenTs = v > 0 ? v : Date.now();
+  }catch(e){ _chatLastSeenTs = Date.now(); }
+}
+function saveChatLastSeen(ts){
+  _chatLastSeenTs = ts;
+  try{ safeStorage.set(CHAT_LAST_SEEN_KEY, String(ts)); }catch(e){}
+}
+function markChatAsSeen(){
+  _chatNotifCount = 0;
+  saveChatLastSeen(Date.now());
+  _renderChatBadge();
+  buildSidebar();
+}
+function _renderChatBadge(){
+  document.querySelectorAll("[data-chat-notif-badge]").forEach(el => {
+    if(_chatNotifCount > 0 && currentView !== "chat"){
+      el.textContent = _chatNotifCount > 99 ? "99+" : String(_chatNotifCount);
+      el.style.display = "inline-flex";
+    } else {
+      el.style.display = "none";
+    }
+  });
+}
+function _calcNotifCount(msgs){
+  const me = getCurrentUsername();
+  return msgs.filter(m => {
+    const ts = m.ts || m.timestamp || 0;
+    return ts > _chatLastSeenTs && m.user !== me && !m.deleted;
+  }).length;
+}
+function _applyNotifCount(count){
+  if(count === _chatNotifCount) return;
+  _chatNotifCount = count;
+  _renderChatBadge();
+  buildSidebar();
+}
+
+function startChatNotifListener(){
+  loadChatLastSeen();
+
+  /* ── مستمع Firebase (الوقت الحقيقي) ── */
+  function tryFirebaseListener(){
+    if(!chatFirebaseReady || !db) return false;
+    try{
+      if(_chatNotifUnsub){ try{_chatNotifUnsub();}catch(_){} }
+      _chatNotifUnsub = db.collection("public_chat")
+        .orderBy("ts","desc").limit(100)
+        .onSnapshot(snapshot => {
+          if(currentView === "chat"){
+            markChatAsSeen();
+            return;
+          }
+          const msgs = snapshot.docs.map(d => Object.assign({id:d.id}, d.data()));
+          _applyNotifCount(_calcNotifCount(msgs));
+        }, e => {
+          console.warn("chat notif Firebase error:", e);
+          startPollingFallback();
+        });
+      return true;
+    }catch(e){ console.warn("chatNotif Firebase setup failed:", e); return false; }
+  }
+
+  /* ── Polling fallback (localStorage) ── */
+  function startPollingFallback(){
+    if(_chatNotifInterval) clearInterval(_chatNotifInterval);
+    _chatNotifInterval = setInterval(() => {
+      if(currentView === "chat"){ markChatAsSeen(); return; }
+      const msgs = getLocalChatMessages();
+      _applyNotifCount(_calcNotifCount(msgs));
+    }, 3000);
+  }
+
+  /* جرّب Firebase أولاً، لو فشل اشتغل بالـ polling */
+  if(!tryFirebaseListener()) startPollingFallback();
+
+  /* راقب لو Firebase اشتغل لاحقاً */
+  let _retries = 0;
+  const _waitFb = setInterval(() => {
+    _retries++;
+    if(chatFirebaseReady && db){
+      clearInterval(_waitFb);
+      if(_chatNotifInterval){ clearInterval(_chatNotifInterval); _chatNotifInterval = null; }
+      tryFirebaseListener();
+    }
+    if(_retries > 20) clearInterval(_waitFb); /* توقف بعد دقيقة */
+  }, 3000);
+}
+
 function isFirebaseConfigured(){
   return !!(FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("ضع_") &&
             FIREBASE_CONFIG.projectId && !FIREBASE_CONFIG.projectId.startsWith("ضع_"));
@@ -7321,8 +7791,8 @@ function initChatBackend(){
       }
     }, e => console.warn('platform lock listener error:', e));
 
-    /* مراقب حسابات المستخدمين */
-    try{ startUsersCloudListener(); }catch(e){ console.warn('startUsersCloudListener failed:', e); }
+    /* مراقب حسابات المستخدمين — يُشغَّل لاحقاً من DOMContentLoaded بعد اكتمال المزامنة */
+    /* (لا تستدعِ startUsersCloudListener هنا لتجنب الاستدعاء المزدوج) */
 
     /* مراقب شات لحفظ نسخة محلية */
     try{
@@ -7371,17 +7841,41 @@ function syncUsersFromCloud(){
 }
 
 /* ---- مراقب Firebase: يُطبّق الحذف والحظر فوريًا على كل الأجهزة ---- */
+let _usersListenerStarted = false; /* منع الاستدعاء المزدوج */
 function startUsersCloudListener(){
   if(!usersFirebaseReady || !db) return;
+  /* لو المراقب شغّال خلّيه يكمل — بس اعمل unsub لو في واحد قديم */
   if(_usersFsUnsub) _usersFsUnsub();
+  _usersListenerStarted = true;
+
+  /* نتجاهل أول snapshot عشان الـ Firestore بيبعته فورًا قبل اكتمال المزامنة */
+  let _snapshotCount = 0;
   _usersFsUnsub = db.collection("users_db").onSnapshot(snapshot => {
+    _snapshotCount++;
     const remote = {};
     snapshot.forEach(doc => { remote[doc.id] = doc.data(); });
+
+    /* حماية: لو الـ snapshot فارغ تمامًا (0 مستخدمين) ده غالباً مشكلة شبكة/صلاحيات
+       مش حذف حقيقي — نتجاهله عشان نمنع الـ reload الكاذب */
+    if(Object.keys(remote).length === 0 && _snapshotCount <= 3){
+      console.warn("startUsersCloudListener: empty snapshot ignored (possible network/auth issue)");
+      return;
+    }
+
     safeStorage.set(DB_USERS_KEY, JSON.stringify(remote));
     if(currentView === 'admin'){ renderAdminPanel(); }
+
+    /* تجاهل أول snapshot صالح لتفادي reload مبكر قبل استكمال تحميل الجلسة */
+    if(_snapshotCount === 1){ return; }
+
     const me = getCurrentUsername();
-    if(!me) return;
+    if(!me) return; /* مفيش جلسة نشطة — مش محتاجين نعمل حاجة */
+
+    /* لو المزامنة السحابية الأولى لسه مخلصتش، استنّى */
+    if(!window.__pa_cloud_sync_done) return;
+
     if(!remote[me]){
+      /* المستخدم اتحذف من الـ admin */
       if(!window.__pa_session_reload_triggered){
         window.__pa_session_reload_triggered = true;
         safeStorage.remove(SESSION_KEY);
@@ -7503,6 +7997,7 @@ function clearAllChat(){
 
 function selectChat(){
   currentView = "chat";
+  markChatAsSeen(); /* امسح الإشعارات فور دخول الشات */
   if(isEffectiveChatLocked()){
     document.getElementById("tab-name").textContent = "🔒 الشات مقفل";
     document.getElementById("chapter-pos").textContent = "الشات مقفل مؤقتًا";
@@ -8168,16 +8663,31 @@ function startApp(){
   initPyodide();
 
   document.getElementById("menu-toggle").addEventListener("click", () => {
-    const isMobile = window.innerWidth <= 860;
+    const isMobile = window.innerWidth <= 859;
     if(isMobile){
-      document.getElementById("sidebar").classList.toggle("open");
-      document.getElementById("sidebar-backdrop").classList.toggle("show");
+      const sidebar = document.getElementById("sidebar");
+      const backdrop = document.getElementById("sidebar-backdrop");
+      const isOpen = sidebar.classList.contains("open");
+      if(isOpen){
+        sidebar.classList.remove("open");
+        backdrop.classList.remove("show");
+      } else {
+        sidebar.classList.add("open");
+        backdrop.classList.add("show");
+      }
     } else {
       /* Desktop: toggle collapse */
       document.getElementById("app").classList.toggle("sidebar-collapsed");
     }
   });
   document.getElementById("sidebar-backdrop").addEventListener("click", closeSidebarMobile);
+
+  /* Close sidebar on resize from mobile to desktop */
+  window.addEventListener("resize", () => {
+    if(window.innerWidth > 859){
+      closeSidebarMobile();
+    }
+  }, { passive: true });
 }
 
 function closeSidebarMobile(){
@@ -8187,7 +8697,7 @@ function closeSidebarMobile(){
 
 function collapseSidebarOnLesson(){
   /* على الـ desktop: أخفِ الـ sidebar وأظهر الـ hamburger */
-  if(window.innerWidth > 860){
+  if(window.innerWidth > 859){
     document.getElementById("app").classList.add("sidebar-collapsed");
   } else {
     /* على الموبايل: أغلق الـ sidebar لو مفتوح */
@@ -8474,14 +8984,19 @@ function showAuthScreen(){
     const r = mode === "login" ? await loginUser(u, p) : await registerUser(u, p);
     if(!r.ok){
       submitBtn.classList.remove("loading");
+      /* reset step dots on register failure */
+      if(mode === "register"){
+        step1.textContent = ""; step1.className = "auth-step-dot active";
+        stepLine1.className = "auth-step-line";
+        step2.className = "auth-step-dot";
+      }
       setError(r.msg);
       return;
     }
     if(mode === "register"){
       step2.textContent = "✓"; step2.className = "auth-step-dot done";
-      setSuccess("تم إنشاء الحساب! جارٍ تسجيل الدخول...");
-      const r2 = await loginUser(u, p);
-      if(!r2.ok){ submitBtn.classList.remove("loading"); setError(r2.msg); return; }
+      /* registerUser بيسجل الجلسة مباشرة — مش محتاجين loginUser ثاني */
+      setSuccess("تم إنشاء الحساب بنجاح! جارٍ تحميل المنصة...");
     }
     setSuccess("أهلاً " + u + "! جارٍ تحميل المنصة...");
     setTimeout(()=>{
@@ -8524,7 +9039,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     if(el){ el.classList.add("hide"); setTimeout(() => el.remove(), 600); }
   }
 
+  /* ── انتظر Firebase SDK يتحمل كامل (App + Firestore) — بحد أقصى 8 ثواني ── */
+  await new Promise(resolve => {
+    /* الشرط: firebase موجود AND firestore function موجودة AND علامة الجاهزية مرفوعة */
+    function isReady(){
+      return window.__firebaseSDKReady === true &&
+             typeof firebase !== "undefined" &&
+             typeof firebase.firestore === "function";
+    }
+    if(isReady()){ resolve(); return; }
+    let waited = 0;
+    const t = setInterval(() => {
+      waited += 100;
+      if(isReady() || waited >= 8000){
+        clearInterval(t); resolve();
+      }
+    }, 100);
+  });
+
   initChatBackend();
+  /* شغّل مستمع الإشعارات — يراقب Firebase لو جاهز أو يستخدم polling */
+  startChatNotifListener();
   if(statusEl) statusEl.textContent = "جارٍ مزامنة الحسابات مع السحابة…";
 
   /* تنظيف الـ cache القديم/التالف من localStorage قبل المزامنة */
@@ -8538,6 +9073,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await syncUsersFromCloud();
   await syncCustomExamFromCloud();
+  window.__pa_cloud_sync_done = true;
   ensureMainAdminAccount();
 
   const name = getCurrentUsername();
