@@ -175,10 +175,13 @@
 
   #app{
     display:flex;
+    /* fallback → dvh → svh for iOS Safari address bar */
     height:calc(100vh - 2px - var(--statusbar-h));
     height:calc(100dvh - 2px - var(--statusbar-h));
+    height:calc(100svh - 2px - var(--statusbar-h));
     margin-top:2px;
     min-height:0;
+    overflow:hidden;
     position:relative;
     background:
       radial-gradient(800px 500px at 10% 0%,   rgba(124,134,212,.07)  0%, transparent 60%),
@@ -189,8 +192,6 @@
 
   /* ---------- Sidebar file tree ---------- */
   #sidebar{
-    width:var(--sidebar-w);
-    flex:0 0 var(--sidebar-w);
     background:linear-gradient(180deg, rgba(30,35,56,.98) 0%, rgba(24,28,44,.99) 100%);
     backdrop-filter:blur(24px) saturate(1.8);
     -webkit-backdrop-filter:blur(24px) saturate(1.8);
@@ -198,27 +199,76 @@
     display:flex;
     flex-direction:column;
     overflow:hidden;
+    overflow-y:auto;
     padding-right:var(--safe-r);
-    box-shadow:4px 0 32px rgba(0,0,0,.4), 1px 0 0 var(--border);
-    position:relative;
-    z-index:5;
-    transition:transform .28s cubic-bezier(.4,0,.2,1), flex-basis .28s cubic-bezier(.4,0,.2,1), width .28s cubic-bezier(.4,0,.2,1), min-width .28s cubic-bezier(.4,0,.2,1);
+    /* MOBILE-FIRST: drawer مخفي خارج الشاشة لا يأخذ أي مساحة */
+    position:fixed;
+    top:calc(2px + var(--tabbar-h));
+    bottom:0;
+    right:0;
+    z-index:40;
+    width:var(--sidebar-w);
+    flex:0 0 auto;
+    transform:translateX(calc(var(--sidebar-w) + 4px));
+    box-shadow:none;
+    transition:transform .28s cubic-bezier(.4,0,.2,1), box-shadow .28s ease;
+    will-change:transform;
+  }
+  #sidebar.open{
+    transform:translateX(0);
+    box-shadow:-8px 0 40px rgba(0,0,0,.55);
   }
   #app.sidebar-collapsed #sidebar{
-    transform:translateX(calc(var(--sidebar-w) + 20px));
-    flex-basis:0 !important;
-    width:0 !important;
-    min-width:0 !important;
-    overflow:hidden;
-    border:none;
+    transform:translateX(calc(var(--sidebar-w) + 4px)) !important;
   }
   .brand{
-    padding:22px 20px 18px;
+    padding:16px 16px 14px;
     border-bottom:1px solid var(--border);
     flex:0 0 auto;
     position:relative;
     overflow:hidden;
     background:linear-gradient(160deg, rgba(124,134,212,.06) 0%, rgba(180,158,224,.02) 60%, transparent 100%);
+    display:flex;
+    flex-direction:column;
+  }
+  /* زر إغلاق الـ sidebar على الـ Desktop — يظهر بس ≥ 860px */
+  #sidebar-collapse-btn{
+    display:none;
+    position:absolute;
+    top:10px;
+    left:10px;
+    width:32px;
+    height:32px;
+    border-radius:8px;
+    background:transparent;
+    border:none;
+    cursor:pointer;
+    align-items:center;
+    justify-content:center;
+    color:var(--text-mute);
+    transition:background .18s ease, color .18s ease, transform .15s ease;
+    -webkit-tap-highlight-color:transparent;
+    z-index:2;
+    flex-shrink:0;
+  }
+  #sidebar-collapse-btn:hover{
+    background:rgba(124,134,212,.13);
+    color:var(--blue-light);
+  }
+  #sidebar-collapse-btn:active{ transform:scale(.9); }
+  #sidebar-collapse-btn .hb-icon{ width:16px; height:13px; gap:4px; }
+  #sidebar-collapse-btn .hb-icon span{ width:16px; height:2px; }
+  #sidebar-collapse-btn .hb-icon span:first-child{ width:12px; }
+  #sidebar-collapse-btn .hb-icon span:last-child{ width:10px; }
+  @media (min-width: 860px){
+    #sidebar-collapse-btn{ display:flex; }
+  }
+  [data-theme="light"] #sidebar-collapse-btn{
+    color:#6a6890;
+  }
+  [data-theme="light"] #sidebar-collapse-btn:hover{
+    background:rgba(90,98,176,.12);
+    color:#3b4278;
   }
   .brand::before{
     content:"";position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;
@@ -323,13 +373,70 @@
   #menu-toggle{
     display:none;
     flex:0 0 auto;
-    padding:7px 9px;color:var(--text-dim);font-size:17px;
-    border-radius:8px;
-    transition:background .15s,color .15s;
+    align-items:center;
+    justify-content:center;
+    width:38px;
+    height:38px;
+    padding:0;
+    border-radius:9px;
+    background:transparent;
+    border:none;
+    cursor:pointer;
+    color:var(--text-dim);
+    transition:background .18s ease, color .18s ease, transform .15s ease;
     -webkit-tap-highlight-color:transparent;
     touch-action:manipulation;
+    position:relative;
+    z-index:10;
+    flex-shrink:0;
   }
-  #menu-toggle:hover{background:rgba(124,134,212,.10);color:var(--blue-light);}
+  #menu-toggle:hover{
+    background:rgba(124,134,212,.13);
+    color:var(--blue-light);
+  }
+  #menu-toggle:active{
+    transform:scale(.92);
+    background:rgba(124,134,212,.20);
+  }
+  /* ── الـ hamburger icon: ثلاث خطوط CSS خالص ── */
+  .hb-icon{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    gap:5px;
+    width:20px;
+    height:16px;
+    pointer-events:none;
+  }
+  .hb-icon span{
+    display:block;
+    width:20px;
+    height:2px;
+    border-radius:2px;
+    background:currentColor;
+    transition:transform .25s cubic-bezier(.4,0,.2,1),
+               opacity   .2s  ease,
+               width     .25s cubic-bezier(.4,0,.2,1);
+    flex-shrink:0;
+  }
+  /* خط أول أقصر قليلاً لمظهر أجمل */
+  .hb-icon span:first-child{ width:16px; align-self:flex-end; }
+  .hb-icon span:last-child { width:12px; align-self:flex-end; }
+  /* حالة "مفتوح" → X */
+  #menu-toggle.is-open .hb-icon span:nth-child(1){
+    transform:translateY(7px) rotate(45deg);
+    width:20px;
+  }
+  #menu-toggle.is-open .hb-icon span:nth-child(2){
+    opacity:0;
+    transform:scaleX(0);
+  }
+  #menu-toggle.is-open .hb-icon span:nth-child(3){
+    transform:translateY(-7px) rotate(-45deg);
+    width:20px;
+  }
+  #menu-toggle:hover{background:rgba(124,134,212,.13);color:var(--blue-light);}
   .tab{
     display:flex;align-items:center;gap:9px;
     padding:8px 18px;
@@ -1658,365 +1765,350 @@
 
   #sidebar-backdrop{display:none;}
 
-  /* ---- Sidebar collapsed (desktop) ---- */
-  /* ══════════════════════════════════════════════════════
-     RESPONSIVE SYSTEM — شامل جميع الأجهزة والمتصفحات
-     ══════════════════════════════════════════════════════
-     Breakpoints:
-       xs  : < 360px   (هواتف صغيرة جداً)
-       sm  : 360-479px (هواتف عادية)
-       md  : 480-639px (هواتف كبيرة)
-       lg  : 640-859px (تابلت صغير / landscape phone)
-       xl  : 860-1099px (تابلت كبير / iPad / laptop صغير)
-       2xl : 1100-1399px (laptop عادي)
-       3xl : ≥ 1400px  (desktop كبير)
-  ══════════════════════════════════════════════════════ */
+  /* ════════════════════════════════════════════════════════
+     RESPONSIVE SYSTEM — نظيف وشامل لكل الأجهزة
+     ════════════════════════════════════════════════════════ */
 
-  /* ── Desktop كبير ≥ 1400px ── */
-  @media (min-width: 1400px){
-    :root{ --sidebar-w:324px; }
-    #lesson{max-width:940px;}
-  }
-
-  /* ── Laptop 1100–1399px ── */
-  @media (max-width: 1399px) and (min-width: 1100px){
-    :root{ --sidebar-w:276px; }
-    #lesson{max-width:800px;}
-  }
-
-  /* ── Tablet landscape / laptop صغير 860–1099px ── */
-  @media (max-width: 1099px) and (min-width: 860px){
-    :root{ --sidebar-w:236px; }
-    .file-name{font-size:12px;}
-    .brand-stats, .brand-sub{font-size:10px;}
-    #lesson{max-width:680px;}
-    .code-input{font-size:13.5px;}
-  }
-
-  /* ── Tablet / iPad / Mobile landscape < 860px ── */
-  @media (max-width: 859px){
-    :root{
-      --sidebar-w: min(320px, 80vw);
-      --tabbar-h: 46px;
-    }
-
-    /* Sidebar: drawer floating over content */
-    #sidebar{
-      position: fixed;
-      top: calc(2px + var(--tabbar-h));
-      bottom: 0;
-      right: 0;
-      z-index: 40;
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     DESKTOP ≥ 860px — Sidebar ثابت في الـ layout
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (min-width: 860px) {
+    /* Sidebar: إرجاعه static في الـ flex row */
+    #sidebar {
+      position: relative !important;
+      top: auto !important; bottom: auto !important; right: auto !important;
+      z-index: 5 !important;
+      flex: 0 0 var(--sidebar-w) !important;
       width: var(--sidebar-w) !important;
-      flex-basis: var(--sidebar-w) !important;
+      transform: none !important;
+      box-shadow: 4px 0 32px rgba(0,0,0,.4), 1px 0 0 var(--border) !important;
+      transition: flex-basis .28s cubic-bezier(.4,0,.2,1),
+                  width .28s cubic-bezier(.4,0,.2,1),
+                  min-width .28s cubic-bezier(.4,0,.2,1),
+                  transform .28s cubic-bezier(.4,0,.2,1) !important;
+    }
+    /* Collapsed state on desktop */
+    #app.sidebar-collapsed #sidebar {
+      flex: 0 0 0 !important;
+      width: 0 !important;
       min-width: 0 !important;
-      transform: translateX(calc(var(--sidebar-w) + 2px));
-      transition: transform .28s cubic-bezier(.4,0,.2,1), box-shadow .28s ease;
-      box-shadow: none;
-      border-left: 1px solid var(--border);
-      will-change: transform;
+      overflow: hidden !important;
+      border: none !important;
+      box-shadow: none !important;
+      transform: none !important;
     }
-    #sidebar.open{
-      transform: translateX(0);
-      box-shadow: -8px 0 40px rgba(0,0,0,.5);
+    #sidebar-backdrop { display: none !important; }
+    #menu-toggle { display: none !important; }
+    #app.sidebar-collapsed #menu-toggle {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+    }
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Desktop XL ≥ 1400px
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (min-width: 1400px) {
+    :root { --sidebar-w: 320px; }
+    #lesson { max-width: 920px; }
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Laptop 1100–1399px
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 1399px) and (min-width: 1100px) {
+    :root { --sidebar-w: 270px; }
+    #lesson { max-width: 780px; }
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Tablet landscape / small laptop 860–1099px
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 1099px) and (min-width: 860px) {
+    :root { --sidebar-w: 230px; }
+    .file-name { font-size: 11.5px; }
+    .brand-stats, .brand-sub { font-size: 10px; }
+    #lesson { max-width: 640px; }
+    .code-input { font-size: 13px; }
+    .block h2 { font-size: 17px; }
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     MOBILE / TABLET < 860px — Sidebar drawer
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 859px) {
+    :root {
+      --sidebar-w: min(300px, 82vw);
+      --tabbar-h: 46px;
+      --statusbar-h: 24px;
     }
 
-    /* sidebar-collapsed class: same as closed on mobile */
-    #app.sidebar-collapsed #sidebar{
-      transform: translateX(calc(var(--sidebar-w) + 2px)) !important;
-      width: var(--sidebar-w) !important;
-      flex-basis: var(--sidebar-w) !important;
-      border: 1px solid var(--border) !important;
-    }
-
-    /* Main takes full width */
-    #main{ width: 100%; }
-
-    /* Hamburger always visible on mobile */
-    #menu-toggle{
+    /* Hamburger always visible */
+    #menu-toggle {
       display: flex !important;
       align-items: center;
       justify-content: center;
     }
 
     /* Backdrop */
-    #sidebar-backdrop{
+    #sidebar-backdrop {
       display: block;
       position: fixed;
       inset: calc(2px + var(--tabbar-h)) 0 0 0;
-      background: transparent;
       z-index: 39;
+      background: transparent;
       pointer-events: none;
       transition: background .28s ease;
     }
-    #sidebar-backdrop.show{
-      background: rgba(5,8,18,.7);
+    #sidebar-backdrop.show {
+      background: rgba(5,8,18,.72);
       pointer-events: auto;
       backdrop-filter: blur(3px);
       -webkit-backdrop-filter: blur(3px);
     }
 
     /* Lesson */
-    #lesson{ padding: 24px 18px 70px; }
-    .lesson-title{ font-size: clamp(19px, 4.5vw, 24px); }
-    .lesson-footer{ gap: 10px; }
-    .nav-btn span, .nav-btn{ font-size: 12px; }
-    .cell-bar{ padding: 8px 12px; flex-wrap: wrap; gap: 6px; }
+    #lesson { padding: 22px 16px 80px; max-width: 100%; }
+    .lesson-title { font-size: clamp(19px, 5vw, 26px); }
+    .lesson-intro p, .block p { font-size: 14.5px; line-height: 1.88; }
+    .block { margin-top: 28px; }
+    .block h2 { font-size: 16.5px; }
+    .summary-box, .exercise { padding-left: 14px; padding-right: 14px; }
+
+    /* Lesson footer */
+    .lesson-footer {
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .nav-btn { font-size: 12px; padding: 9px 14px; }
+
+    /* Code cell */
+    .cell-bar { padding: 8px 10px; }
 
     /* Chat */
-    .chat-messages{ max-height: 340px; min-height: 180px; }
+    .chat-messages { max-height: 320px; min-height: 160px; }
 
-    /* Auth */
-    .auth-left{ display: none !important; }
-    .auth-card{ flex-basis: auto !important; max-width: 420px; width: 100%; }
-
-    /* Admin */
-    .admin-panel{ padding: 16px 14px; }
+    /* Status bar */
+    #statusbar { font-size: 10px; padding: 0 10px; gap: 8px; }
+    #statusbar .grp { gap: 10px; }
   }
 
-  /* ── iPad / تابلت 640–859px ── */
-  @media (max-width: 859px) and (min-width: 640px){
-    :root{ --sidebar-w: min(300px, 75vw); }
-    #lesson{ padding: 24px 20px 70px; }
-    .lesson-title{ font-size: clamp(20px, 4vw, 24px); }
-    .chat-messages{ max-height: 380px; }
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Small tablet / large phone 640–859px
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 859px) and (min-width: 640px) {
+    :root { --sidebar-w: min(290px, 78vw); }
+    #lesson { padding: 20px 18px 75px; }
   }
 
-  /* ── هاتف كبير 480–639px ── */
-  @media (max-width: 639px){
-    :root{
-      --sidebar-w: min(290px, 82vw);
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Phone 480–639px
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 639px) {
+    :root {
+      --sidebar-w: min(290px, 84vw);
       --tabbar-h: 44px;
-      --statusbar-h: 24px;
+      --statusbar-h: 22px;
     }
 
-    #lesson{ padding: 20px 14px 65px; }
-    .lesson-title{ font-size: clamp(17px, 5vw, 21px); }
-    .lesson-intro p, .block p, .exercise p{ font-size: 14.5px; line-height: 1.88; }
-    .block{ margin-top: 26px; }
-    .summary-box, .exercise{ padding-left: 14px; padding-right: 14px; }
-    .lesson-footer{
-      justify-content: center;
-      text-align: center;
+    #lesson { padding: 18px 14px 70px; }
+    .lesson-title { font-size: clamp(17px, 5.5vw, 22px); }
+    .lesson-footer {
       flex-direction: column;
       align-items: stretch;
     }
-    .lesson-footer .nav-btn{
-      flex: 1 1 auto;
-      justify-content: center;
-      min-width: 0;
-    }
-    .lesson-footer .complete-btn{
+    .lesson-footer .nav-btn { justify-content: center; }
+    .lesson-footer .complete-btn {
       order: -1;
       width: 100%;
       justify-content: center;
       text-align: center;
     }
-    .auth-card{ border-radius: 16px; padding: 28px 20px 22px; }
-    .auth-split{ padding: 16px; gap: 0; }
-
-    /* Code cell */
-    .code-input{ font-size: 13px; padding: 14px; min-height: 100px; }
-    .cell-btn{ font-size: 11px; padding: 6px 10px; }
-    .cell-label{ display: none; }
-    .output-text, .expected-text{ font-size: 12px; }
-    .summary-box li{ font-size: 13px; }
-
-    /* Status bar */
-    #statusbar{ font-size: 9.5px; padding: 0 8px; gap: 6px; height: var(--statusbar-h); }
-    #statusbar .grp{ gap: 8px; }
-    #statusbar .grp:last-child span:nth-child(2),
-    #statusbar .grp:last-child span:nth-child(3){ display: none; }
-    #py-status{
-      max-width: 130px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      display: inline-block;
-      vertical-align: middle;
-    }
-
-    /* Certificate */
-    #certificate{ padding: 22px 12px 18px; }
-    .cert-brand{ margin-bottom: 14px; }
-    .cert-footer{ margin-top: 28px; }
-
-    /* Chat */
-    .chat-messages{ max-height: 280px; min-height: 160px; }
-    .chat-send-btn{ padding: 10px 14px; font-size: 12.5px; }
-    .chat-msg{ max-width: 90%; }
-
-    /* Tabbar */
-    #tabbar{ padding: 0 8px; gap: 4px; }
-    .tab{ padding: 7px 12px; font-size: 11.5px; }
-
-    /* Support */
-    .support-member-contacts{ grid-template-columns: 1fr; }
-    .support-grid{ grid-template-columns: 1fr; }
-
-    /* Explain walk */
-    .explain-walk-row{ grid-template-columns: 1fr; gap: 4px; }
-    .explain-walk-row code{ white-space: normal; }
-  }
-
-  /* ── هاتف صغير < 480px ── */
-  @media (max-width: 479px){
-    :root{
-      --sidebar-w: 88vw;
-      --tabbar-h: 42px;
-      --statusbar-h: 22px;
-    }
-
-    html, body{ font-size: 15px; }
-
-    #lesson{ padding: 16px 12px 60px; }
-    .lesson-title{ font-size: clamp(16px, 5.5vw, 19px); }
-    .block p, .exercise p{ font-size: 14px; line-height: 1.83; }
-
-    /* Auth card full width */
-    #auth-overlay{ padding: 12px; }
-    .auth-card{
-      padding: 22px 16px 18px;
-      border-radius: 14px;
-      max-width: 100%;
-      flex-basis: 100% !important;
-    }
-    .auth-title{ font-size: 16px; }
-    .auth-sub{ font-size: 12px; }
-
-    /* Tabbar compact */
-    .tab{ padding: 6px 10px; font-size: 11px; }
-    #tab-name{ max-width: 140px; }
-
-    /* Status bar minimal */
-    #statusbar{ padding: 0 6px; }
 
     /* Code */
-    .code-input{ font-size: 12.5px; padding: 12px; }
-    .cell-actions{ gap: 4px; }
-    .run-btn{ padding: 6px 12px; font-size: 11px; }
+    .code-input { font-size: 13px; padding: 13px; min-height: 100px; }
+    .cell-btn { font-size: 11px; padding: 6px 10px; }
+    .cell-label { display: none; }
+    .output-text, .expected-text { font-size: 12px; }
+
+    /* Summary */
+    .summary-box li { font-size: 13px; }
+
+    /* Status bar */
+    #statusbar { font-size: 9.5px; padding: 0 8px; gap: 6px; }
+    #statusbar .grp { gap: 8px; }
+    #statusbar .grp:last-child span:nth-child(2),
+    #statusbar .grp:last-child span:nth-child(3) { display: none; }
+    #py-status {
+      max-width: 130px;
+      overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; display: inline-block; vertical-align: middle;
+    }
+
+    /* Tab */
+    #tabbar { padding: 0 8px; gap: 4px; }
+    .tab { padding: 7px 10px; font-size: 11.5px; }
+    #tab-name { max-width: 160px; }
+
+    /* Auth */
+    .auth-card { border-radius: 16px; padding: 26px 18px 22px; }
+    .auth-split { padding: 14px; }
+
+    /* Certificate */
+    #certificate { padding: 20px 12px; }
+    .cert-footer { margin-top: 26px; }
 
     /* Chat */
-    .chat-input{ font-size: 13px; padding: 9px 11px; }
-    .chat-msg-text{ font-size: 13px; }
-    .chat-msg{ max-width: 94%; }
-    .chat-send-btn{ padding: 9px 12px; font-size: 12px; }
-    .chat-input-bar{ padding: 9px; gap: 6px; }
-
-    /* Brand sidebar */
-    .brand{ padding: 14px 14px 12px; }
-    .brand-mark{ font-size: 12.5px; }
-    .file-item{ padding: 8px 10px; font-size: 12px; }
+    .chat-messages { max-height: 260px; }
+    .chat-send-btn { padding: 10px 14px; font-size: 12.5px; }
+    .chat-msg { max-width: 90%; }
+    .chat-input-bar { padding: 9px; gap: 6px; }
 
     /* Support */
-    .support-card{ padding: 16px 14px; }
-    .support-member-card{ padding: 16px 14px; }
+    .support-member-contacts { grid-template-columns: 1fr; }
+    .support-grid { grid-template-columns: 1fr; }
+
+    /* Explain walk */
+    .explain-walk-row { grid-template-columns: 1fr; gap: 4px; }
+    .explain-walk-row code { white-space: normal; }
   }
 
-  /* ── هاتف صغير جداً < 360px ── */
-  @media (max-width: 359px){
-    :root{ --sidebar-w: 94vw; }
-
-    #auth-overlay{ padding: 8px; }
-    .auth-card{ padding: 18px 12px 16px; border-radius: 12px; }
-    .auth-title{ font-size: 14.5px; letter-spacing: .5px; }
-
-    .tab{ padding: 5px 8px; font-size: 10.5px; }
-    #tab-name{ max-width: 110px; }
-
-    .code-input{ font-size: 12px; padding: 10px 11px; }
-    .cell-btn{ padding: 5px 8px; font-size: 10.5px; }
-
-    .chat-msg-text{ font-size: 12.5px; }
-    .chat-send-btn{ padding: 8px 10px; }
-
-    .lesson-title{ font-size: 15px; }
-    #lesson{ padding: 14px 10px 55px; }
-  }
-
-  /* ── Landscape على هواتف (height صغير) ── */
-  @media (max-height: 500px) and (max-width: 900px){
-    :root{ --tabbar-h: 38px; --statusbar-h: 20px; }
-    .brand{ padding: 10px 14px 8px; }
-    .brand-stats, .brand-sub{ display: none; }
-    #lesson{ padding-top: 12px; padding-bottom: 50px; }
-    .lesson-footer{ margin-top: 20px; padding-top: 12px; }
-    #auth-overlay{ align-items: flex-start; padding-top: 10px; }
-    .auth-card{ padding: 18px 20px 16px; }
-    .auth-logo{ margin-bottom: 10px; }
-    .auth-logo img, .auth-logo svg{ width: 44px; height: 44px; }
-    .auth-sub{ margin: 6px 0 14px; }
-    .chat-messages{ max-height: 200px; min-height: 100px; }
-  }
-
-  /* ── iPad Pro / تابلت كبير portrait 768px–1024px ── */
-  @media (min-width: 768px) and (max-width: 859px){
-    :root{ --sidebar-w: min(280px, 70vw); }
-    .auth-left{ display: none !important; }
-    .auth-card{ max-width: 460px; }
-  }
-
-  /* ── Desktop toggle: sidebar collapsed ── */
-  @media (min-width: 860px){
-    #menu-toggle{ display: none; }
-    #app.sidebar-collapsed #menu-toggle{ display: flex !important; align-items: center; justify-content: center; }
-    #app.sidebar-collapsed #sidebar{
-      transform: translateX(calc(var(--sidebar-w) + 20px));
-      flex-basis: 0 !important;
-      width: 0 !important;
-      min-width: 0 !important;
-      overflow: hidden;
-      border: none;
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Small phone < 480px
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 479px) {
+    :root {
+      --sidebar-w: 88vw;
+      --tabbar-h: 42px;
+      --statusbar-h: 20px;
     }
+
+    #lesson { padding: 14px 12px 65px; }
+    .lesson-title { font-size: clamp(15px, 5.5vw, 19px); }
+    .block p, .exercise p { font-size: 14px; line-height: 1.83; }
+    .block h2 { font-size: 15px; }
+
+    /* Auth */
+    #auth-overlay { padding: 10px; }
+    .auth-card { padding: 20px 14px 18px; border-radius: 14px; max-width: 100%; }
+    .auth-title { font-size: 16px; }
+    .auth-sub { font-size: 12px; margin: 6px 0 16px; }
+    .auth-field input { font-size: 14px; }
+
+    /* Tabbar */
+    .tab { padding: 6px 8px; font-size: 11px; }
+    #tab-name { max-width: 120px; }
+    #menu-toggle { padding: 6px 8px; }
+
+    /* Code */
+    .code-input { font-size: 12.5px; padding: 11px; }
+    .cell-btn { padding: 5px 8px; font-size: 10.5px; }
+    .run-btn { padding: 6px 12px; font-size: 11px; }
+    .output-text { font-size: 11.5px; padding: 6px 12px 12px; }
+
+    /* Chat */
+    .chat-msg-text { font-size: 13px; }
+    .chat-send-btn { padding: 9px 10px; font-size: 12px; }
+    .chat-input { font-size: 13px; padding: 9px 11px; }
+    .chat-msg { max-width: 94%; }
+
+    /* Brand sidebar */
+    .brand { padding: 12px 12px 10px; }
+    .brand-mark { font-size: 12.5px; }
+    .brand-stats, .brand-sub { font-size: 9.5px; }
+    .file-item { padding: 8px 10px; font-size: 11.5px; }
+
+    /* Support */
+    .support-card { padding: 14px 12px; }
+    .support-member-card { padding: 14px 12px; }
+
+    /* Admin */
+    .admin-user-row { flex-wrap: wrap; gap: 8px; }
+    .admin-exam-card .row { flex-direction: column; align-items: flex-start; }
   }
 
-  /* ── Auth responsive ── */
-  @media (min-width: 780px){
-    .auth-left{ display: flex !important; }
-  }
-  @media (max-width: 779px){
-    .auth-split{ flex-direction: column; align-items: center; }
-    .auth-left{ display: none !important; }
-  }
-
-  /* ── Loading screen responsive ── */
-  @media (max-width: 480px){
-    .loading-bar-track{ width: 180px; }
-    .loading-tip{ max-width: 100%; font-size: 12px; padding: 10px 14px; }
-    .loading-brand{ font-size: 15px; }
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Very small phone < 360px
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 359px) {
+    :root { --sidebar-w: 94vw; --tabbar-h: 40px; }
+    #lesson { padding: 12px 10px 60px; }
+    .lesson-title { font-size: 15px; }
+    #auth-overlay { padding: 8px; }
+    .auth-card { padding: 16px 12px 14px; border-radius: 12px; }
+    .tab { padding: 5px 7px; font-size: 10.5px; }
+    #tab-name { max-width: 100px; }
+    .code-input { font-size: 12px; padding: 10px; }
   }
 
-  /* ── Print ── */
-  @media print{
-    #sidebar, #tabbar, #statusbar, #menu-toggle, #sidebar-backdrop{ display: none !important; }
-    #main{ width: 100% !important; }
-    #lesson{ max-width: 100% !important; padding: 0 !important; }
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Landscape on phones (short height)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-height: 500px) and (max-width: 900px) {
+    :root { --tabbar-h: 38px; --statusbar-h: 18px; }
+    .brand { padding: 8px 12px; }
+    .brand-stats, .brand-sub { display: none; }
+    #lesson { padding-top: 10px; padding-bottom: 50px; }
+    .lesson-footer { margin-top: 16px; padding-top: 12px; }
+    #auth-overlay { align-items: flex-start; padding-top: 8px; }
+    .auth-card { padding: 16px 18px; }
+    .auth-logo { margin-bottom: 8px; }
+    .auth-logo img, .auth-logo svg { width: 40px; height: 40px; }
+    .auth-sub { margin: 4px 0 12px; }
+    .chat-messages { max-height: 180px; min-height: 80px; }
   }
 
-  /* ── Reduced motion ── */
-  @media (prefers-reduced-motion: reduce){
-    *, *::before, *::after{
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Auth panel
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (min-width: 780px) { .auth-left { display: flex !important; } }
+  @media (max-width: 779px) {
+    .auth-left { display: none !important; }
+    .auth-split { flex-direction: column; align-items: center; }
+    .auth-card { flex-basis: auto !important; max-width: 440px; width: 100%; }
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Loading screen
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 480px) {
+    .loading-bar-track { width: 180px; }
+    .loading-tip { max-width: 100%; font-size: 12px; padding: 10px 14px; }
+    .loading-brand { font-size: 15px; }
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Print
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media print {
+    #sidebar, #tabbar, #statusbar, #menu-toggle, #sidebar-backdrop { display: none !important; }
+    #main { width: 100% !important; }
+    #lesson { max-width: 100% !important; padding: 0 !important; }
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Reduced motion
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
       transition-duration: .01ms !important;
       animation-duration: .01ms !important;
       animation-iteration-count: 1 !important;
     }
-    .run-btn{ animation: none; }
-    .loading-logo{ animation: none; }
-    .loading-bar-fill{ animation: none; left: 0; width: 60%; }
-    .loading-status .dot{ animation: none; }
+    .run-btn { animation: none; }
+    .loading-logo { animation: none; }
+    .loading-bar-fill { animation: none; left: 0; width: 60%; }
+    .loading-status .dot { animation: none; }
   }
 
-  /* ── Touch devices: remove hover side effects ── */
-  @media (hover: none) and (pointer: coarse){
-    .nav-btn:hover,
-    .complete-btn:hover,
-    .file-item:hover,
-    .cell-btn:hover,
-    .support-card:hover,
-    .chat-send-btn:hover{
-      transform: none;
-    }
-    .run-btn:hover{ transform: none; filter: none; }
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     Touch devices — remove sticky hover states
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (hover: none) and (pointer: coarse) {
+    .nav-btn:hover, .complete-btn:hover, .file-item:hover,
+    .cell-btn:hover, .support-card:hover, .chat-send-btn:hover { transform: none; }
+    .run-btn:hover { transform: none; filter: none; }
   }
 
   /* ══════════════ LIGHT THEME – warm cream ══════════════ */
@@ -2094,6 +2186,19 @@
   [data-theme="light"] #tabbar{
     background:rgba(250,249,246,.98);
     box-shadow:0 1px 0 var(--border);
+  }
+  [data-theme="light"] #menu-toggle{
+    color:#4a4870;
+  }
+  [data-theme="light"] #menu-toggle:hover{
+    background:rgba(90,98,176,.12);
+    color:#3b4278;
+  }
+  [data-theme="light"] #menu-toggle:active{
+    background:rgba(90,98,176,.20);
+  }
+  [data-theme="light"] .hb-icon span{
+    background:currentColor;
   }
 
   [data-theme="light"] .tab{
@@ -2270,6 +2375,9 @@
 <div id="app">
   <aside id="sidebar">
     <div class="brand">
+      <button id="sidebar-collapse-btn" aria-label="إغلاق القائمة الجانبية" title="إغلاق القائمة">
+        <div class="hb-icon"><span></span><span></span><span></span></div>
+      </button>
       <div class="brand-mark">PYTHON_ACADEMY</div>
       <div class="brand-stats" id="brand-stats">65 فصلًا + ملعب تفاعلي</div>
       <div class="brand-sub" id="progress-text">تقدّمك: 0 / 65 فصلًا</div>
@@ -8662,7 +8770,19 @@ function startApp(){
   selectPlayground();
   initPyodide();
 
-  document.getElementById("menu-toggle").addEventListener("click", () => {
+  const menuToggleBtn = document.getElementById("menu-toggle");
+
+  /* ── دالة toggle الـ sidebar على الـ Desktop ── */
+  function toggleDesktopSidebar(){
+    const app = document.getElementById("app");
+    app.classList.toggle("sidebar-collapsed");
+    const collapsed = app.classList.contains("sidebar-collapsed");
+    /* الـ hamburger في الـ tabbar: يتحول X لما sidebar مخفي */
+    menuToggleBtn.classList.toggle("is-open", !collapsed);
+  }
+
+  /* زر الـ hamburger في الـ tabbar (mobile + desktop-collapsed) */
+  menuToggleBtn.addEventListener("click", () => {
     const isMobile = window.innerWidth <= 859;
     if(isMobile){
       const sidebar = document.getElementById("sidebar");
@@ -8671,15 +8791,25 @@ function startApp(){
       if(isOpen){
         sidebar.classList.remove("open");
         backdrop.classList.remove("show");
+        menuToggleBtn.classList.remove("is-open");
       } else {
         sidebar.classList.add("open");
         backdrop.classList.add("show");
+        menuToggleBtn.classList.add("is-open");
       }
     } else {
-      /* Desktop: toggle collapse */
-      document.getElementById("app").classList.toggle("sidebar-collapsed");
+      toggleDesktopSidebar();
     }
   });
+
+  /* زر إغلاق داخل الـ sidebar (desktop فقط) */
+  const sidebarCollapseBtn = document.getElementById("sidebar-collapse-btn");
+  if(sidebarCollapseBtn){
+    sidebarCollapseBtn.addEventListener("click", () => {
+      toggleDesktopSidebar();
+    });
+  }
+
   document.getElementById("sidebar-backdrop").addEventListener("click", closeSidebarMobile);
 
   /* Close sidebar on resize from mobile to desktop */
@@ -8693,6 +8823,8 @@ function startApp(){
 function closeSidebarMobile(){
   document.getElementById("sidebar").classList.remove("open");
   document.getElementById("sidebar-backdrop").classList.remove("show");
+  const btn = document.getElementById("menu-toggle");
+  if(btn) btn.classList.remove("is-open");
 }
 
 function collapseSidebarOnLesson(){
